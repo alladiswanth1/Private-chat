@@ -1,0 +1,14 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# this is a buildless static site — nothing should be installed here
+node_modules/
+
+# local test artifacts / screenshots
+screenshot-*.png
+*.log

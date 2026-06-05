@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Defense-in-depth: even though all peer data is rendered via textContent, lock down sources. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' wss: https:; base-uri 'none'; form-action 'none'; object-src 'none'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="Ephemeral peer-to-peer chat. No accounts, no servers, no history — open the page and talk." />
+  <meta name="color-scheme" content="dark" />
+  <title>chat-to-chat · live p2p chat</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- Nickname gate -->
+  <div id="gate" class="gate" aria-hidden="false">
+    <form id="gate-form" class="gate-card" autocomplete="off">
+      <div class="gate-logo">💬</div>
+      <h1 class="gate-title">chat&#8209;to&#8209;chat</h1>
+      <p class="gate-sub">Live, peer&#8209;to&#8209;peer chat. No accounts, no servers, no history — whoever is here right now can talk.</p>
+      <label class="gate-label" for="nick">Pick a name to join</label>
+      <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" spellcheck="false" required />
+      <button id="gate-go" class="gate-btn" type="submit">Join the chat →</button>
+      <p class="gate-foot">Messages travel directly between browsers, end&#8209;to&#8209;end encrypted, and vanish when you leave.</p>
+    </form>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">💬</span>
+        <span class="brand-name">chat&#8209;to&#8209;chat</span>
+      </div>
+      <button id="status" class="status" type="button" title="Connection status">
+        <span id="status-dot" class="dot dot--off"></span>
+        <span id="status-text" class="status-text">Connecting…</span>
+      </button>
+      <div class="topbar-right">
+        <button id="people-toggle" class="pill" type="button" aria-expanded="false" title="Who's online">
+          <span class="pill-ico">👥</span><span id="online-count">1</span>
+        </button>
+        <button id="me" class="pill pill--me" type="button" title="Change your name">
+          <span id="me-dot" class="me-dot"></span><span id="me-name">you</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      <main class="chat">
+        <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages"></div>
+        <div id="typing" class="typing" aria-hidden="true" hidden></div>
+      </main>
+
+      <div id="scrim" class="scrim" hidden></div>
+      <aside id="people" class="people" aria-label="People online">
+        <div class="people-head">
+          <span>Online — <span id="people-count">1</span></span>
+          <button id="people-close" class="people-close" type="button" aria-label="Close" title="Close">✕</button>
+        </div>
+        <ul id="people-list" class="people-list"></ul>
+      </aside>
+    </div>
+
+    <footer class="composer">
+      <div id="emoji" class="emoji-panel" hidden></div>
+      <button id="emoji-btn" class="icon-btn" type="button" title="Emoji" aria-label="Emoji">😀</button>
+      <input id="input" class="input" type="text" maxlength="4000" placeholder="Message…" aria-label="Message" autocomplete="off" />
+      <button id="send" class="send-btn" type="button" title="Send" aria-label="Send">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"/></svg>
+      </button>
+    </footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
