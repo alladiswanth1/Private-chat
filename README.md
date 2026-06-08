@@ -138,29 +138,45 @@ Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node bui
 | Field        | What it does                                                              |
 |--------------|--------------------------------------------------------------------------|
 | `appId`      | Your app's namespace on the network. **Change it if you fork** this.      |
-| `roomId`     | Defaults to `location.hostname` (one room per domain; any path collapses to it). |
+| `roomId`     | Default room = `location.hostname`; a `#r=<code>` share code switches rooms. |
+| `relayUrls` / `relayRedundancy` | Curated public Nostr relays + how many to use (pinned for reliable discovery). |
 | `historyShare` | How many recent messages a newcomer is handed (default 30).            |
+| `meshCap`    | Soft cap before suggesting an overflow room (default 12).                  |
+| `flood`      | Per-channel inbound rate limits (msg/name/typing/react/presence).          |
 | `turnConfig` | Optional TURN servers (see above).                                        |
 | `maxNameLen` / `maxMsgLen` | Input length caps.                                          |
 
-Want **separate rooms by URL** instead of one global room? Change `roomId` to read a
-hash, e.g. `roomId: location.hash.slice(1) || 'lobby'`, and share links like
-`yoursite.com/#team-standup`.
+**Rooms & sharing:** the default room is the whole domain. Click **🔗 Share → Start a
+new private room** to mint a `#r=<code>` room, then share the **link or the short code**
+(no QR — a code anyone can type). An optional **password** (Trystero-native, client-side)
+makes a room truly private. All of it is just room-ids over the same free relays — no
+server, no database.
 
 ---
 
 ## Features
 
-- Pick a nickname (no account, no password) — remembered locally for next time.
-- Live messages, end-to-end encrypted, never stored on disk.
-- **Live history hand-off** — when you join, peers already in the room send you the
-  last ~30 messages so you can catch up on the conversation.
-- **Community guidelines** panel (left) + centered **"Global Free Speech"** banner.
-- **Who's online** list + count (right).
-- **Typing indicators**, **message timestamps**, **emoji picker**, and a
-  **scroll-to-latest** button.
-- Connection-status indicator and join/leave notices.
-- 3-column layout on desktop; on mobile the side panels become slide-in drawers.
+- Pick a nickname (no account, no password) — remembered locally; live avatar + a
+  "🎲 surprise me" generator on the join screen.
+- Live messages, end-to-end encrypted, never stored on disk, with **safe linkify +
+  minimal markdown** (`**bold**`, `_italic_`, `` `code` ``) rendered as DOM nodes only.
+- **Live history hand-off** — a newcomer is handed the last ~30 messages (and their
+  reactions) by the single elected peer already in the room.
+- **Private rooms via share code** (`#r=<code>`), optional **room password**, and an
+  overflow-room suggestion when a mesh gets large.
+- **Emoji reactions**, **reply / quote**, **slash commands** (`/nick /me /who /clear
+  /help /shrug`), and a searchable **emoji picker** with recents.
+- **Per-user mute** (session-only), **idle/away presence**, duplicate-name fingerprints,
+  **typing indicators**, **timestamps + time-gap dividers**, and a **scroll-to-latest** /
+  **unread tab badge**.
+- **Light / dark / system theme**, **safe-view blur**, **who's-online** list, community
+  guidelines, connection + relay/latency panel, and an honest IP-exposure notice.
+- Built for keyboards & screen readers: focus rings, focus-trapped mobile drawers,
+  keyboard-navigable emoji grid, live regions, skip link, and forced-colors support.
+- 3-column layout on desktop; slide-in drawers on mobile.
+- **Security/abuse hardening:** transport-namespaced message ids (no silent
+  suppression), sanitization of bidi/zero-width/control chars, per-channel flood
+  limits, and reply/reaction/history that never trust claimed identity.
 
 ## Limitations (honest ones)
 

@@ -1,304 +1,332 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
   <meta charset="UTF-8" />
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss: https:; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="dark light" />
   <title>Global Free Speech · live p2p chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
   <style>
 /* ===================== design tokens ===================== */
 :root {
-  --bg: #090d17;
-  --bg-2: #0f1524;
-  --panel: #141b2c;
-  --panel-2: #1a2336;
-  --panel-3: #212c44;
-  --line: #283450;
-  --line-soft: #1e2840;
-  --txt: #eef2fb;
-  --txt-dim: #aab6d2;
-  --txt-faint: #8693b2;
-  --accent: #6d8cff;
-  --accent-2: #a06bff;
+  --bg: #090d17; --bg-2: #0f1524; --panel: #141b2c; --panel-2: #1a2336; --panel-3: #212c44;
+  --line: #283450; --line-soft: #1e2840;
+  --txt: #eef2fb; --txt-dim: #aab6d2; --txt-faint: #8693b2;
+  --accent: #6d8cff; --accent-2: #a06bff;
   --accent-grad: linear-gradient(135deg, #6d8cff, #a06bff);
   --me-bubble: linear-gradient(135deg, #4f6bff, #8a4fff);
-  --ok: #41e0a3;
-  --warn: #ffcf5c;
-  --off: #5b6680;
-  --danger: #ff6b8b;
-  --radius: 16px;
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.3);
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
-    "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  --ok: #41e0a3; --warn: #ffcf5c; --off: #5b6680; --danger: #ff6b8b;
+  --radius: 16px; --shadow: 0 18px 50px rgba(0,0,0,.5); --shadow-sm: 0 4px 16px rgba(0,0,0,.3);
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
   --side-w: 248px;
+}
+/* light palette (explicit) */
+:root[data-theme="light"] {
+  --bg: #eef1f7; --bg-2: #ffffff; --panel: #f4f6fb; --panel-2: #ffffff; --panel-3: #eaeefc;
+  --line: #d7deec; --line-soft: #e6ebf5;
+  --txt: #161c2b; --txt-dim: #4a5675; --txt-faint: #6b7896;
+  --me-bubble: linear-gradient(135deg, #5b78ff, #9163ff);
+  --shadow: 0 18px 50px rgba(40,55,95,.18); --shadow-sm: 0 4px 16px rgba(40,55,95,.12);
+}
+/* system follows the OS */
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg: #eef1f7; --bg-2: #ffffff; --panel: #f4f6fb; --panel-2: #ffffff; --panel-3: #eaeefc;
+    --line: #d7deec; --line-soft: #e6ebf5;
+    --txt: #161c2b; --txt-dim: #4a5675; --txt-faint: #6b7896;
+    --me-bubble: linear-gradient(135deg, #5b78ff, #9163ff);
+    --shadow: 0 18px 50px rgba(40,55,95,.18); --shadow-sm: 0 4px 16px rgba(40,55,95,.12);
+  }
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
-  margin: 0;
-  font-family: var(--font);
-  color: var(--txt);
+  margin: 0; font-family: var(--font); color: var(--txt);
   background:
-    radial-gradient(1200px 760px at 82% -12%, rgba(160, 107, 255, 0.20), transparent 60%),
-    radial-gradient(1100px 680px at -12% 112%, rgba(109, 140, 255, 0.18), transparent 55%),
+    radial-gradient(1200px 760px at 82% -12%, rgba(160,107,255,.20), transparent 60%),
+    radial-gradient(1100px 680px at -12% 112%, rgba(109,140,255,.18), transparent 55%),
     var(--bg);
-  -webkit-font-smoothing: antialiased;
-  overflow: hidden;
+  -webkit-font-smoothing: antialiased; overflow: hidden;
 }
-button { font-family: inherit; }
+button { font-family: inherit; color: inherit; }
+.sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip { position: fixed; left: 8px; top: -50px; z-index: 100; background: var(--accent); color: #fff; padding: 8px 14px; border-radius: 10px; text-decoration: none; transition: top .15s; }
+.skip:focus { top: 8px; }
 
-/* ===================== nickname gate ===================== */
-.gate {
-  position: fixed; inset: 0; z-index: 50;
-  display: grid; place-items: center; padding: 24px;
-  background: rgba(5, 8, 14, 0.62); backdrop-filter: blur(7px);
-}
+/* keyboard focus rings everywhere */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+/* ===================== gate ===================== */
+.gate { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: rgba(5,8,14,.62); backdrop-filter: blur(7px); }
 .gate[hidden] { display: none; }
-.gate-card {
-  width: min(430px, 100%);
-  background: linear-gradient(180deg, var(--panel-2), var(--panel));
-  border: 1px solid var(--line);
-  border-radius: 24px; padding: 36px 32px 28px;
-  box-shadow: var(--shadow); text-align: center;
-  animation: rise 0.4s ease;
-}
-@keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
-.gate-logo { font-size: 56px; line-height: 1; filter: drop-shadow(0 8px 22px rgba(109, 140, 255, 0.55)); }
-.gate-title {
-  margin: 14px 0 8px; font-size: 30px; line-height: 1.15; letter-spacing: -0.5px;
-  background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.gate-sub { margin: 0 auto 22px; color: var(--txt-dim); font-size: 14.5px; line-height: 1.55; max-width: 36ch; }
-.gate-label { display: block; text-align: left; font-size: 12px; color: var(--txt-faint); margin: 0 0 7px 4px; text-transform: uppercase; letter-spacing: 0.7px; }
-.gate-input {
-  width: 100%; padding: 14px 16px; font-size: 16px; color: var(--txt);
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px;
-  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
-}
-.gate-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109, 140, 255, 0.28); }
-.gate-btn {
-  width: 100%; margin-top: 14px; padding: 14px 16px; font-size: 16px; font-weight: 600;
-  color: #fff; border: none; border-radius: 12px; background: var(--accent-grad);
-  cursor: pointer; transition: transform 0.08s, filter 0.15s; box-shadow: 0 8px 24px rgba(109, 140, 255, 0.35);
-}
-.gate-btn:hover { filter: brightness(1.08); }
-.gate-btn:active { transform: translateY(1px); }
-.gate-foot { margin: 18px 0 0; color: var(--txt-faint); font-size: 12px; line-height: 1.5; }
+.gate-card { width: min(440px,100%); background: linear-gradient(180deg,var(--panel-2),var(--panel)); border: 1px solid var(--line); border-radius: 24px; padding: 34px 32px 26px; box-shadow: var(--shadow); text-align: center; animation: rise .4s ease; }
+@keyframes rise { from { opacity: 0; transform: translateY(16px);} to { opacity: 1; transform: none; } }
+.gate-logo { font-size: 54px; line-height: 1; filter: drop-shadow(0 8px 22px rgba(109,140,255,.55)); }
+.gate-title { margin: 12px 0 8px; font-size: 30px; line-height: 1.15; letter-spacing: -.5px; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.gate-sub { margin: 0 auto 18px; color: var(--txt-dim); font-size: 14.5px; line-height: 1.55; max-width: 38ch; }
+.gate-id { display: flex; justify-content: center; margin: 6px 0 14px; }
+.gate-avatar { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 24px; color: #0b0f1a; box-shadow: var(--shadow-sm); }
+.gate-label { display: block; text-align: left; font-size: 12px; color: var(--txt-faint); margin: 0 0 7px 4px; text-transform: uppercase; letter-spacing: .7px; }
+.gate-row { display: flex; gap: 8px; }
+.gate-input { width: 100%; padding: 14px 16px; font-size: 16px; color: var(--txt); background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.gate-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.28); }
+.gate-dice { flex: none; width: 50px; border: 1px solid var(--line); background: var(--bg-2); border-radius: 12px; font-size: 20px; cursor: pointer; }
+.gate-dice:hover { border-color: var(--accent); }
+.gate-passwrap { margin-top: 12px; }
+.gate-passwrap[hidden] { display: none; }
+.gate-btn { width: 100%; margin-top: 14px; padding: 14px 16px; font-size: 16px; font-weight: 600; color: #fff; border: none; border-radius: 12px; background: var(--accent-grad); cursor: pointer; transition: transform .08s, filter .15s; box-shadow: 0 8px 24px rgba(109,140,255,.35); }
+.gate-btn:hover { filter: brightness(1.08); } .gate-btn:active { transform: translateY(1px); }
+.gate-trio { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; margin: 16px 0 0; color: var(--txt-dim); font-size: 12px; }
+.gate-foot { margin: 12px 0 0; color: var(--txt-faint); font-size: 11.5px; line-height: 1.5; }
 
 /* ===================== app shell ===================== */
 .app { display: flex; flex-direction: column; height: 100dvh; }
 .app[hidden] { display: none; }
-
-.topbar {
-  display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; gap: 12px;
-  padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top));
-  border-bottom: 1px solid var(--line); background: rgba(15, 21, 36, 0.72); backdrop-filter: blur(12px);
-}
+.topbar { display: grid; grid-template-columns: 1fr minmax(0,auto) 1fr; align-items: center; gap: 12px; padding: 10px 14px; padding-top: max(10px,env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 78%, transparent); backdrop-filter: blur(12px); }
 .tb-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tb-center { display: flex; justify-content: center; min-width: 0; }
 .tb-right { display: flex; align-items: center; gap: 8px; justify-content: flex-end; min-width: 0; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
 .brand-mark { font-size: 20px; }
-.brand-name { letter-spacing: -0.3px; }
-.headline {
-  margin: 0; font-size: 16px; font-weight: 800; letter-spacing: 0.2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-  background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
-}
+.headline { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.roomchip { display: inline-flex; align-items: center; gap: 2px; background: color-mix(in srgb, var(--accent) 18%, var(--panel)); border: 1px solid var(--accent); color: var(--txt); padding: 5px 10px; border-radius: 999px; font-size: 12.5px; cursor: default; max-width: 140px; }
+.roomchip[hidden] { display: none; }
+.rc-hash { color: var(--accent); font-weight: 700; }
+#room-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.status { display: inline-flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line); color: var(--txt-dim); padding: 6px 11px; border-radius: 999px; font-size: 12.5px; }
+.status { display: inline-flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line); color: var(--txt-dim); padding: 6px 11px; border-radius: 999px; font-size: 12.5px; cursor: pointer; }
+.status:hover { border-color: var(--accent); }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
-.dot--off { background: var(--off); }
-.dot--wait { background: var(--warn); animation: pulse 1.6s infinite; }
-.dot--on { background: var(--ok); animation: pulse 2.2s infinite; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(65, 224, 163, 0.5); } 70% { box-shadow: 0 0 0 7px rgba(65, 224, 163, 0); } 100% { box-shadow: 0 0 0 0 rgba(65, 224, 163, 0); } }
-
-.iconpill { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--txt); padding: 6px 11px; border-radius: 999px; font-size: 13px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.dot--off { background: var(--off); } .dot--wait { background: var(--warn); animation: pulse 1.6s infinite; } .dot--on { background: var(--ok); animation: pulse 2.2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(65,224,163,.5);} 70% { box-shadow: 0 0 0 7px rgba(65,224,163,0);} 100% { box-shadow: 0 0 0 0 rgba(65,224,163,0);} }
+.iconpill { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--txt); padding: 6px 11px; border-radius: 999px; font-size: 13px; cursor: pointer; transition: background .15s, border-color .15s; }
 .iconpill:hover { background: var(--panel-2); border-color: var(--accent); }
 .mechip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--txt); padding: 6px 11px; border-radius: 999px; font-size: 13px; max-width: 150px; }
 .mechip #me-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; }
 .mobile-only { display: none; }
 
+/* popovers (status + share) */
+.pop-wrap { position: relative; display: inline-flex; }
+.pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; width: 250px; max-height: 60vh; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 12px; }
+.pop[hidden] { display: none; }
+.pop-h { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--txt-faint); margin: 4px 2px 8px; }
+.status-panel .sp-h { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--txt-faint); margin: 8px 2px 4px; }
+.sp-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 12.5px; color: var(--txt-dim); }
+.sp-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.sp-ms { color: var(--txt-faint); }
+.share-note { margin: 0 2px 10px; font-size: 12px; color: var(--txt-dim); line-height: 1.5; }
+.share-code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; letter-spacing: 1px; background: var(--bg-2); border: 1px dashed var(--line); border-radius: 10px; padding: 9px 12px; text-align: center; color: var(--txt); margin-bottom: 10px; word-break: break-all; }
+.share-btns { display: flex; gap: 6px; }
+.share-b { flex: 1; padding: 9px 8px; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--txt); border-radius: 10px; cursor: pointer; }
+.share-b:hover { border-color: var(--accent); background: var(--panel-3); }
+.share-new { width: 100%; margin-top: 8px; flex: none; }
+
+/* banner */
+.banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; background: color-mix(in srgb, var(--warn) 16%, var(--bg-2)); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--txt); }
+.banner[hidden] { display: none; }
+.banner-btn { background: var(--accent-grad); color: #fff; border: none; border-radius: 999px; padding: 5px 12px; font-size: 12.5px; cursor: pointer; }
+.banner-x { margin-left: auto; background: none; border: none; color: var(--txt-dim); font-size: 14px; cursor: pointer; }
+
 /* ===================== body: 3 columns ===================== */
 .body { flex: 1; display: flex; min-height: 0; position: relative; }
-
-.side { width: var(--side-w); flex: none; overflow-y: auto; background: rgba(15, 21, 36, 0.5); scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
-.side--left { border-right: 1px solid var(--line); }
-.side--right { border-left: 1px solid var(--line); }
-.side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--txt-faint); padding: 16px 14px 12px; position: sticky; top: 0; background: var(--bg-2); }
+.side { width: var(--side-w); flex: none; overflow-y: auto; background: color-mix(in srgb, var(--bg-2) 55%, transparent); scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.side--left { border-right: 1px solid var(--line); } .side--right { border-left: 1px solid var(--line); }
+.side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .7px; color: var(--txt-faint); padding: 16px 14px 12px; position: sticky; top: 0; background: var(--bg-2); }
 .side-close { display: none; border: none; background: none; color: var(--txt-dim); font-size: 16px; line-height: 1; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
 .side-close:hover { background: var(--panel); color: var(--txt); }
-
-/* rules panel */
 .rules-body { padding: 0 14px 18px; }
 .rules-intro { margin: 2px 0 14px; color: var(--txt-dim); font-size: 13px; line-height: 1.55; }
 .rules-list { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 11px; }
 .rules-list li { display: flex; gap: 9px; font-size: 13px; line-height: 1.5; color: var(--txt-dim); }
 .rules-list strong { color: var(--txt); font-weight: 650; }
 .r-ico { flex: none; width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; margin-top: 1px; }
-.r-ico.ok { background: rgba(65, 224, 163, 0.16); color: var(--ok); }
-.r-ico.no { background: rgba(255, 107, 139, 0.16); color: var(--danger); }
+.r-ico.ok { background: rgba(65,224,163,.16); color: var(--ok); } .r-ico.no { background: rgba(255,107,139,.16); color: var(--danger); }
 .rules-note { margin: 0; padding: 11px 12px; background: var(--panel); border: 1px solid var(--line-soft); border-radius: 12px; font-size: 12px; line-height: 1.55; color: var(--txt-faint); }
 .rules-note strong { color: var(--txt-dim); }
+.settings { margin-top: 16px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
+.settings-h { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--txt-faint); margin: 0 2px 8px; }
+.settings-row { display: flex; gap: 8px; }
+.set-btn { flex: 1; padding: 9px 8px; font-size: 13px; border: 1px solid var(--line); background: var(--panel); color: var(--txt); border-radius: 10px; cursor: pointer; }
+.set-btn:hover { border-color: var(--accent); }
+.set-btn[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--panel)); }
 
-/* people panel */
+/* people */
 .people-list { list-style: none; margin: 0; padding: 6px 10px 16px; display: flex; flex-direction: column; gap: 4px; }
 .person { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 10px; }
 .person:hover { background: var(--panel); }
+.person:hover .mutebtn { opacity: 1; }
 .person .avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12px; color: #0b0f1a; flex: none; }
+.person.idle .avatar { opacity: .5; }
 .person .pname { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.person .tag { margin-left: auto; font-size: 11px; color: var(--accent); }
+.person.idle .pname { color: var(--txt-faint); }
 .person.pending .pname { color: var(--txt-faint); font-style: italic; }
+.person .tag { margin-left: auto; font-size: 11px; color: var(--accent); }
+.mutebtn { margin-left: auto; font-size: 11px; color: var(--txt-faint); background: none; border: 1px solid var(--line-soft); border-radius: 8px; padding: 2px 7px; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.mutebtn:hover { color: var(--danger); border-color: var(--danger); }
+.fp { font-size: 10.5px; font-family: ui-monospace, monospace; color: var(--txt-faint); background: var(--panel-3); border-radius: 5px; padding: 0 4px; }
 
 /* ===================== chat ===================== */
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-.messages {
-  flex: 1; overflow-y: auto; padding: 18px clamp(12px, 4vw, 44px) 10px;
-  display: flex; flex-direction: column; gap: 1px;
-  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
-  scroll-behavior: smooth; overscroll-behavior: contain;
-}
-.messages::-webkit-scrollbar { width: 9px; }
-.messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
-
+.messages { flex: 1; overflow-y: auto; padding: 18px clamp(12px,4vw,44px) 10px; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; scroll-behavior: smooth; overscroll-behavior: contain; }
+.messages::-webkit-scrollbar { width: 9px; } .messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
 .sys { align-self: center; margin: 9px 0; color: var(--txt-faint); font-size: 12px; background: var(--panel); border: 1px solid var(--line-soft); padding: 4px 13px; border-radius: 999px; max-width: 90%; text-align: center; }
+.sys.emote { font-style: italic; color: var(--txt-dim); background: transparent; border: none; max-width: min(78%,720px); }
 
-.msg { display: flex; gap: 10px; max-width: min(74%, 720px); margin-top: 13px; }
-.msg.cont { margin-top: 2px; }
-.msg--new { animation: pop 0.2s ease; }
-@keyframes pop { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.empty { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 30px 20px; pointer-events: none; }
+.empty[hidden] { display: none; }
+.empty > * { pointer-events: auto; max-width: 360px; }
+.empty-logo { font-size: 48px; filter: drop-shadow(0 8px 22px rgba(109,140,255,.45)); }
+.empty-h { font-size: 18px; font-weight: 700; margin: 12px 0 6px; }
+.empty-p { color: var(--txt-dim); font-size: 13.5px; line-height: 1.55; margin-bottom: 16px; }
+.empty-btn { background: var(--accent-grad); color: #fff; border: none; border-radius: 999px; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: var(--shadow-sm); }
+.empty-btn:hover { filter: brightness(1.08); }
+
+.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 13px; position: relative; }
+.msg.cont { margin-top: 2px; } .msg.flash .bubble { animation: flash 1.2s ease; }
+@keyframes flash { 0%,100% { box-shadow: none;} 30% { box-shadow: 0 0 0 3px rgba(109,140,255,.6);} }
+.msg--new { animation: pop .2s ease; }
+@keyframes pop { from { opacity: 0; transform: translateY(7px);} to { opacity: 1; transform: none; } }
 .msg .avatar { width: 36px; height: 36px; border-radius: 50%; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #0b0f1a; box-shadow: var(--shadow-sm); }
 .msg.cont .avatar { visibility: hidden; height: 0; }
 .msg .stack { display: flex; flex-direction: column; min-width: 0; }
 .msg .meta { display: flex; align-items: baseline; gap: 8px; margin: 0 2px 3px; }
 .msg.cont .meta { display: none; }
-.msg .who { font-size: 13px; font-weight: 700; }
-.msg .time { font-size: 11px; color: var(--txt-faint); }
-.bubble {
-  background: var(--panel-2); border: 1px solid var(--line-soft);
-  padding: 9px 13px; border-radius: 5px 15px 15px 15px; font-size: 15px; line-height: 1.5;
-  word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-wrap;
-}
+.msg .who { font-size: 13px; font-weight: 700; } .msg .time { font-size: 11px; color: var(--txt-faint); }
+.bubble { background: var(--panel-2); border: 1px solid var(--line-soft); padding: 9px 13px; border-radius: 5px 15px 15px 15px; font-size: 15px; line-height: 1.5; word-wrap: break-word; overflow-wrap: anywhere; white-space: pre-wrap; }
+.bubble .link { color: var(--accent); text-decoration: underline; }
+.bubble code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; background: var(--panel-3); padding: 1px 5px; border-radius: 5px; }
 .msg.cont .bubble { border-radius: 15px; }
 .msg.me { align-self: flex-end; flex-direction: row-reverse; }
 .msg.me .stack { align-items: flex-end; }
-.msg.me .bubble { background: var(--me-bubble); border: none; color: #fff; border-radius: 15px 5px 15px 15px; box-shadow: 0 4px 14px rgba(109, 80, 255, 0.28); }
+.msg.me .bubble { background: var(--me-bubble); border: none; color: #fff; border-radius: 15px 5px 15px 15px; box-shadow: 0 4px 14px rgba(109,80,255,.28); }
+.msg.me .bubble .link { color: #dfe6ff; } .msg.me .bubble code { background: rgba(255,255,255,.18); }
 .msg.me.cont .bubble { border-radius: 15px; }
 .msg.me .meta { flex-direction: row-reverse; }
 
-/* jump-to-latest */
-.jump {
-  position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 5;
-  display: inline-flex; align-items: center; gap: 6px;
-  background: var(--accent-grad); color: #fff; border: none; border-radius: 999px;
-  padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: var(--shadow-sm);
-  animation: rise 0.2s ease;
-}
-.jump[hidden] { display: none; }
-.jump:hover { filter: brightness(1.08); }
+/* reply quote */
+.replyquote { display: flex; gap: 6px; align-items: baseline; max-width: 100%; text-align: left; margin: 0 2px 3px; padding: 4px 9px; background: var(--panel); border-left: 3px solid var(--accent); border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--txt-dim); }
+.msg.me .replyquote { border-left: none; border-right: 3px solid var(--accent); }
+.rq-who { font-weight: 700; color: var(--txt); flex: none; }
+.rq-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* typing indicator */
-.typing { padding: 2px clamp(12px, 4vw, 44px) 8px; color: var(--txt-dim); font-size: 12.5px; min-height: 18px; display: flex; align-items: center; gap: 7px; }
+/* reactions */
+.reacts { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 2px 0; }
+.msg.me .reacts { justify-content: flex-end; }
+.react { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--txt-dim); cursor: pointer; }
+.react.mine { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--panel)); color: var(--txt); }
+
+/* message tools (hover/focus) */
+.msgtools { position: absolute; top: -10px; right: 8px; display: none; gap: 2px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 2px; box-shadow: var(--shadow-sm); }
+.msg.me .msgtools { right: auto; left: 8px; }
+.msg:hover .msgtools, .msg:focus-within .msgtools { display: flex; }
+.mt { width: 26px; height: 26px; border: none; background: none; border-radius: 50%; cursor: pointer; font-size: 14px; }
+.mt:hover { background: var(--panel-3); }
+.reactmenu { position: absolute; top: 100%; right: 0; margin-top: 4px; display: flex; gap: 2px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; box-shadow: var(--shadow); z-index: 10; }
+.reactmenu button { width: 30px; height: 30px; border: none; background: none; border-radius: 50%; cursor: pointer; font-size: 17px; }
+.reactmenu button:hover { background: var(--panel-3); }
+
+/* safe view (blur incoming until hover/focus) */
+.safe-view .msg:not(.me) .bubble { filter: blur(7px); transition: filter .12s; }
+.safe-view .msg:not(.me):hover .bubble, .safe-view .msg:not(.me):focus-within .bubble { filter: none; }
+
+/* jump-to-latest */
+.jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 5; display: inline-flex; align-items: center; gap: 6px; background: var(--accent-grad); color: #fff; border: none; border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: var(--shadow-sm); animation: rise .2s ease; }
+.jump[hidden] { display: none; } .jump:hover { filter: brightness(1.08); }
+
+/* typing */
+.typing { padding: 2px clamp(12px,4vw,44px) 8px; color: var(--txt-dim); font-size: 12.5px; min-height: 18px; display: flex; align-items: center; gap: 7px; }
 .typing[hidden] { display: none; }
 .typing .dots { display: inline-flex; gap: 3px; }
 .typing .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--txt-dim); animation: blink 1.2s infinite; }
-.typing .dots i:nth-child(2) { animation-delay: 0.2s; }
-.typing .dots i:nth-child(3) { animation-delay: 0.4s; }
-@keyframes blink { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
+.typing .dots i:nth-child(2) { animation-delay: .2s; } .typing .dots i:nth-child(3) { animation-delay: .4s; }
+@keyframes blink { 0%,60%,100% { opacity: .3;} 30% { opacity: 1; } }
 
-/* ===================== composer ===================== */
-.composer {
-  position: relative; display: flex; align-items: center; gap: 8px;
-  padding: 12px clamp(12px, 4vw, 44px); padding-bottom: max(12px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line); background: rgba(15, 21, 36, 0.72); backdrop-filter: blur(12px);
-}
-.icon-btn { width: 44px; height: 44px; flex: none; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); font-size: 19px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+/* reply bar */
+.reply-bar { display: flex; align-items: center; gap: 8px; padding: 8px clamp(12px,4vw,44px); border-top: 1px solid var(--line-soft); background: var(--panel); font-size: 13px; color: var(--txt-dim); }
+.reply-bar[hidden] { display: none; }
+.rb-ico { color: var(--accent); } .rb-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rb-x { background: none; border: none; color: var(--txt-dim); cursor: pointer; font-size: 13px; }
+
+/* composer */
+.composer { position: relative; display: flex; align-items: center; gap: 8px; padding: 12px clamp(12px,4vw,44px); padding-bottom: max(12px,env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 78%, transparent); backdrop-filter: blur(12px); }
+.icon-btn { width: 44px; height: 44px; flex: none; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); font-size: 19px; cursor: pointer; transition: background .15s, border-color .15s; }
 .icon-btn:hover { background: var(--panel-2); border-color: var(--accent); }
-.input { flex: 1; min-width: 0; padding: 13px 16px; font-size: 15px; color: var(--txt); background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; outline: none; transition: border-color 0.15s, box-shadow 0.15s; }
-.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109, 140, 255, 0.24); }
-.send-btn { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border: none; border-radius: 12px; background: var(--accent-grad); color: #fff; cursor: pointer; transition: transform 0.08s, filter 0.15s, opacity 0.15s; }
-.send-btn:hover { filter: brightness(1.08); }
-.send-btn:active { transform: translateY(1px); }
-.send-btn:disabled { opacity: 0.42; cursor: default; filter: none; }
+.input { flex: 1; min-width: 0; padding: 13px 16px; font-size: 15px; color: var(--txt); background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; outline: none; transition: border-color .15s, box-shadow .15s; }
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.24); }
+.send-btn { width: 46px; height: 46px; flex: none; display: grid; place-items: center; border: none; border-radius: 12px; background: var(--accent-grad); color: #fff; cursor: pointer; transition: transform .08s, filter .15s, opacity .15s; }
+.send-btn:hover { filter: brightness(1.08); } .send-btn:active { transform: translateY(1px); } .send-btn:disabled { opacity: .42; cursor: default; filter: none; }
 
 /* emoji panel */
-.emoji-panel {
-  position: absolute; left: clamp(12px, 4vw, 44px); bottom: calc(100% - 4px);
-  width: min(330px, calc(100vw - 32px)); max-height: 244px; overflow-y: auto;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
-  padding: 10px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; z-index: 20;
-}
+.emoji-panel { position: absolute; left: clamp(12px,4vw,44px); bottom: calc(100% - 4px); width: min(330px,calc(100vw - 32px)); background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 10px; z-index: 20; }
 .emoji-panel[hidden] { display: none; }
-.emoji-panel button { border: none; background: none; font-size: 20px; line-height: 1; padding: 6px 0; border-radius: 8px; cursor: pointer; }
-.emoji-panel button:hover { background: var(--panel); }
+.emoji-search { width: 100%; margin-bottom: 8px; padding: 8px 12px; font-size: 14px; color: var(--txt); background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+.emoji-search:focus { border-color: var(--accent); }
+.emoji-grid { max-height: 210px; overflow-y: auto; display: grid; grid-template-columns: repeat(8,1fr); gap: 2px; }
+.emoji-sec { grid-column: 1/-1; font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--txt-faint); padding: 4px 2px 2px; }
+.emoji-grid button { border: none; background: none; font-size: 20px; line-height: 1; padding: 6px 0; border-radius: 8px; cursor: pointer; }
+.emoji-grid button:hover { background: var(--panel); }
 
-/* scrim for mobile slide-in panels */
-.scrim { display: none; position: absolute; inset: 0; z-index: 35; background: rgba(5, 8, 14, 0.55); }
+.scrim { display: none; position: absolute; inset: 0; z-index: 35; background: rgba(5,8,14,.55); }
 
 /* ===================== responsive ===================== */
-@media (max-width: 860px) {
-  :root { --side-w: 230px; }
-}
-
+@media (max-width: 860px) { :root { --side-w: 230px; } }
 @media (max-width: 720px) {
-  .brand { display: none; }  /* headline is the title on mobile; free the space */
-  .status-text { display: none; }
-  .status { padding: 6px 8px; }
-  .mobile-only { display: inline-flex; }
-  .headline { font-size: 15px; }
-  .mechip { display: none; }  /* your name shows in messages & roster; free header space for the title */
-  /* comfortable tap targets on touch screens */
+  .brand { display: none; } .status-text { display: none; } .status { padding: 6px 8px; }
+  .mobile-only { display: inline-flex; } .headline { font-size: 15px; } .mechip { display: none; }
+  .roomchip { max-width: 96px; }
   .iconpill { min-height: 40px; min-width: 40px; justify-content: center; padding: 8px 12px; }
-
-  /* side panels become slide-in overlays */
-  .side {
-    position: absolute; top: 0; bottom: 0; width: min(290px, 84vw); z-index: 40;
-    background: var(--bg-2); box-shadow: var(--shadow);
-    transition: transform 0.24s ease; padding-top: max(4px, env(safe-area-inset-top));
-  }
-  .side--left { left: 0; transform: translateX(-100%); }
-  .side--right { right: 0; transform: translateX(100%); }
+  .side { position: absolute; top: 0; bottom: 0; width: min(290px,84vw); z-index: 40; background: var(--bg-2); box-shadow: var(--shadow); transition: transform .24s ease; padding-top: max(4px,env(safe-area-inset-top)); }
+  .side--left { left: 0; transform: translateX(-100%); } .side--right { right: 0; transform: translateX(100%); }
   .side.open { transform: none; }
   .side-close { display: inline-flex; align-items: center; justify-content: center; }
   .scrim:not([hidden]) { display: block; }
-
-  .msg { max-width: 86%; }
-  .messages { padding-left: 14px; padding-right: 14px; }
-  .typing { padding-left: 14px; padding-right: 14px; }
-  .composer { padding-left: 12px; padding-right: 12px; }
-  .emoji-panel { left: 12px; grid-template-columns: repeat(7, 1fr); }
+  /* keep popovers as dropdowns below their button (topbar's backdrop-filter is a
+     containing block, so position:fixed would anchor to the topbar, not the viewport) */
+  .pop { width: min(86vw, 280px); max-height: 70vh; }
+  .msg { max-width: 86%; } .messages, .typing, .reply-bar { padding-left: 14px; padding-right: 14px; }
+  .composer { padding-left: 12px; padding-right: 12px; } .emoji-panel { left: 12px; } .emoji-grid { grid-template-columns: repeat(7,1fr); }
+  .msgtools { display: flex; }
 }
+@media (max-width: 380px) { .headline { font-size: 13.5px; } .tb-right { gap: 6px; } .iconpill, .status { padding: 6px 7px; } }
 
-@media (max-width: 380px) {
-  .headline { font-size: 13.5px; }
-  .tb-right { gap: 6px; }
-  .iconpill, .mechip, .status { padding: 6px 8px; }
+/* ===================== reduced motion / contrast ===================== */
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; scroll-behavior: auto !important; transition: none !important; } }
+@media (forced-colors: active) {
+  .gate-title, .headline { color: CanvasText; background: none; -webkit-text-fill-color: CanvasText; forced-color-adjust: none; }
+  .iconpill, .status, .bubble, .react, .roomchip, .side, .pop { border: 1px solid CanvasText; }
+  .dot--on, .dot--wait, .dot--off { forced-color-adjust: none; }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  * { animation: none !important; scroll-behavior: auto !important; }
-}
+@media (prefers-contrast: more) { :root { --txt-dim: var(--txt); --txt-faint: var(--txt); --line: var(--txt-faint); } }
 
 </style>
 </head>
 <body>
+  <a class="skip" href="#input">Skip to message box</a>
+
   <!-- Nickname gate -->
   <div id="gate" class="gate">
     <form id="gate-form" class="gate-card" autocomplete="off">
       <div class="gate-logo">💬</div>
       <h1 class="gate-title">Global Free Speech</h1>
-      <p class="gate-sub">Live, anonymous, peer&#8209;to&#8209;peer chat. No accounts, no servers, no history — whoever is here right now can talk.</p>
+      <p class="gate-sub">Live, anonymous, peer&#8209;to&#8209;peer chat. No accounts, no servers, no history — whoever is in <span id="gate-room">the public room</span> right now can talk.</p>
+      <div class="gate-id"><span id="gate-avatar" class="gate-avatar" aria-hidden="true">?</span></div>
       <label class="gate-label" for="nick">Pick a name to join</label>
-      <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" spellcheck="false" required />
+      <div class="gate-row">
+        <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" spellcheck="false" required />
+        <button id="surprise" class="gate-dice" type="button" title="Surprise me">🎲</button>
+      </div>
+      <div id="gate-pass-wrap" class="gate-passwrap" hidden>
+        <label class="gate-label" for="gate-pass">Room password (optional — must match other people in this room)</label>
+        <input id="gate-pass" class="gate-input" type="password" maxlength="64" placeholder="leave blank if none" autocomplete="off" />
+      </div>
       <button id="gate-go" class="gate-btn" type="submit">Join the chat →</button>
-      <p class="gate-foot">Messages travel directly between browsers, end&#8209;to&#8209;end encrypted, and vanish when everyone leaves.</p>
+      <p class="gate-trio"><span>🔒 end&#8209;to&#8209;end encrypted</span><span>🚫 no servers</span><span>💨 vanishes</span></p>
+      <p class="gate-foot">Heads up: chat is direct device&#8209;to&#8209;device, so other people in the room may be able to see your IP address. Use a VPN/Tor if you need anonymity.</p>
     </form>
   </div>
 
@@ -306,42 +334,71 @@ button { font-family: inherit; }
   <div id="app" class="app" hidden>
     <header class="topbar">
       <div class="tb-left">
-        <button id="rules-toggle" class="iconpill mobile-only" type="button" aria-label="Community guidelines" aria-expanded="false">📜</button>
+        <button id="rules-toggle" class="iconpill mobile-only" type="button" aria-label="Guidelines & settings" aria-expanded="false">📜</button>
         <span class="brand"><span class="brand-mark">💬</span><span class="brand-name">chat&#8209;to&#8209;chat</span></span>
+        <button id="room-chip" class="roomchip" type="button" title="You're in a private room" hidden><span class="rc-hash">#</span><span id="room-chip-name"></span></button>
       </div>
       <div class="tb-center"><h1 class="headline">Global Free Speech</h1></div>
       <div class="tb-right">
-        <span class="status" title="Connection status"><span id="status-dot" class="dot dot--off"></span><span id="status-text" class="status-text">Connecting…</span></span>
+        <div class="pop-wrap">
+          <button id="status" class="status" type="button" title="Connection details"><span id="status-dot" class="dot dot--off"></span><span id="status-text" class="status-text">Connecting…</span></button>
+          <div id="status-panel" class="pop status-panel" hidden></div>
+        </div>
+        <div class="pop-wrap">
+          <button id="share-btn" class="iconpill" type="button" aria-label="Share this room">🔗</button>
+          <div id="share" class="pop share-panel" hidden>
+            <div class="pop-h">Invite people</div>
+            <p class="share-note">Anyone with the link or code joins this exact room — no account, no server.</p>
+            <div class="share-code" id="share-code"></div>
+            <div class="share-btns">
+              <button id="share-copy-link" class="share-b" type="button">🔗 Copy link</button>
+              <button id="share-copy-code" class="share-b" type="button"># Copy code</button>
+            </div>
+            <button id="share-new" class="share-b share-new" type="button">✨ Start a new private room</button>
+          </div>
+        </div>
         <button id="people-toggle" class="iconpill" type="button" aria-label="Who's online" aria-expanded="false"><span class="ico">👥</span><span id="online-count">1</span></button>
         <span id="me" class="mechip" title="Your name"><span id="me-dot" class="me-dot"></span><span id="me-name">you</span></span>
       </div>
     </header>
 
+    <div id="banner" class="banner" hidden></div>
+
     <div class="body">
-      <!-- LEFT: community guidelines -->
-      <aside id="rules" class="side side--left" aria-label="Community guidelines">
+      <aside id="rules" class="side side--left" aria-label="Community guidelines and settings">
         <div class="side-head"><span>Chat responsibly</span><button id="rules-close" class="side-close" type="button" aria-label="Close">✕</button></div>
         <div class="rules-body">
           <p class="rules-intro">This is an open, anonymous room. Free speech works best when everyone keeps it human.</p>
           <ul class="rules-list">
             <li><span class="r-ico ok">✓</span><span><strong>Be respectful.</strong> Argue ideas, not people — no harassment, hate, or threats.</span></li>
-            <li><span class="r-ico ok">✓</span><span><strong>Keep it honest.</strong> Don't post false or misleading claims as if they were fact.</span></li>
+            <li><span class="r-ico ok">✓</span><span><strong>Keep it honest.</strong> Don't post false or misleading claims as fact.</span></li>
             <li><span class="r-ico ok">✓</span><span><strong>Assume good faith.</strong> You're talking to real strangers — be kind.</span></li>
             <li><span class="r-ico no">✕</span><span><strong>No spam or scams.</strong> Don't flood the room or push links/schemes.</span></li>
             <li><span class="r-ico no">✕</span><span><strong>Nothing illegal.</strong> No doxxing, no content that harms others.</span></li>
           </ul>
-          <p class="rules-note">💨 Messages are <strong>live &amp; peer&#8209;to&#8209;peer</strong> — nothing is stored on any server. But anyone here can still screenshot, so think before you send.</p>
+          <p class="rules-note">💨 Messages are <strong>live &amp; peer&#8209;to&#8209;peer</strong> — nothing is stored on any server. But anyone here can screenshot, and peers may see your IP. Think before you send.</p>
+          <div class="settings">
+            <div class="settings-h">Settings</div>
+            <div class="settings-row">
+              <button id="theme-btn" class="set-btn" type="button" title="Theme">🌗</button>
+              <button id="blur-btn" class="set-btn" type="button" aria-pressed="false" title="Safe view">🫥 Safe view</button>
+            </div>
+          </div>
         </div>
       </aside>
 
-      <!-- CENTER: chat -->
       <main class="chat">
-        <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages"></div>
+        <div id="messages" class="messages" role="log" aria-live="off" aria-label="Messages"></div>
+        <div id="empty" class="empty" hidden>
+          <div class="empty-logo" aria-hidden="true">💬</div>
+          <div id="empty-h" class="empty-h">You’re the first one here</div>
+          <div id="empty-p" class="empty-p">Share the link and whoever opens it can talk — live, peer-to-peer, nothing stored.</div>
+          <button id="empty-btn" class="empty-btn" type="button">🔗 Copy invite link</button>
+        </div>
         <button id="jump" class="jump" type="button" hidden>↓ New messages</button>
         <div id="typing" class="typing" aria-hidden="true" hidden></div>
       </main>
 
-      <!-- RIGHT: who's online -->
       <aside id="people" class="side side--right" aria-label="People online">
         <div class="side-head"><span>Online — <span id="people-count">1</span></span><button id="people-close" class="side-close" type="button" aria-label="Close">✕</button></div>
         <ul id="people-list" class="people-list"></ul>
@@ -350,15 +407,26 @@ button { font-family: inherit; }
       <div id="scrim" class="scrim" hidden></div>
     </div>
 
+    <div id="reply-bar" class="reply-bar" hidden>
+      <span class="rb-ico">↩</span><span id="reply-text" class="rb-text"></span>
+      <button id="reply-cancel" class="rb-x" type="button" aria-label="Cancel reply">✕</button>
+    </div>
+
     <footer class="composer">
-      <div id="emoji" class="emoji-panel" hidden></div>
+      <div id="emoji" class="emoji-panel" hidden>
+        <input id="emoji-search" class="emoji-search" type="text" placeholder="Search emoji…" aria-label="Search emoji" autocomplete="off" />
+        <div id="emoji-grid" class="emoji-grid" role="grid" aria-label="Emoji"></div>
+      </div>
       <button id="emoji-btn" class="icon-btn" type="button" title="Emoji" aria-label="Emoji">😀</button>
-      <input id="input" class="input" type="text" maxlength="4000" placeholder="Say something…" aria-label="Message" autocomplete="off" />
+      <input id="input" class="input" type="text" maxlength="4000" placeholder="Say something…  (/help for commands)" aria-label="Message" autocomplete="off" />
       <button id="send" class="send-btn" type="button" title="Send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"/></svg>
       </button>
     </footer>
   </div>
+
+  <div id="live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <div id="live-sys" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
   <script type="module">
 var Kr=Object.defineProperty;var $r=(e,n,t)=>n in e?Kr(e,n,{enumerable:!0,configurable:!0,writable:!0,value:t}):e[n]=t;var ne=(e,n,t)=>$r(e,typeof n!="symbol"?n+"":n,t);var pt=Object.freeze({p:0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn,n:0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n,h:1n,a:0n,b:7n,Gx:0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798n,Gy:0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8n}),{p:Se,n:Fe,Gx:qr,Gy:zr,b:wt}=pt,re=32,je=64,kn={publicKey:re+1,publicKeyUncompressed:je+1,signature:je,seed:re+re/2},J=(e="",n=Error)=>{let t=new n(e),{captureStackTrace:o}=Error;throw typeof o=="function"&&o(t,J),t},Jr=e=>e instanceof Uint8Array||ArrayBuffer.isView(e)&&e.constructor.name==="Uint8Array"&&e.BYTES_PER_ELEMENT===1,ce=(e,n,t="")=>{let o=Jr(e),a=e?.length,s=n!==void 0;if(!o||s&&a!==n){let r=t&&`"${t}" `,i=s?` of length ${n}`:"",f=o?`length=${a}`:`type=${typeof e}`,m=r+"expected Uint8Array"+i+", got "+f;return o?J(m,RangeError):J(m,TypeError)}return e},Je=e=>new Uint8Array(e),Pt=(e,n)=>e.toString(16).padStart(n,"0"),kt=e=>{let n="";for(let t of ce(e))n+=Pt(t,2);return n},pe={_0:48,_9:57,A:65,F:70,a:97,f:102},ft=e=>e>=pe._0&&e<=pe._9?e-pe._0:e>=pe.A&&e<=pe.F?e-(pe.A-10):e>=pe.a&&e<=pe.f?e-(pe.a-10):void 0,vt=e=>{let n="hex invalid";if(typeof e!="string")return J(n);let t=e.length,o=t/2;if(t%2)return J(n);let a=Je(o);for(let s=0,r=0;s<o;s++,r+=2){let i=ft(e.charCodeAt(r)),f=ft(e.charCodeAt(r+1));if(i===void 0||f===void 0)return J(n);a[s]=i*16+f}return a},lt=()=>globalThis?.crypto?.subtle??J("crypto.subtle must be defined, consider polyfill"),Ke=(...e)=>{let n=0;for(let a of e)n+=ce(a).length;let t=Je(n),o=0;for(let a of e)t.set(a,o),o+=a.length;return t},Rn=(e=re)=>(globalThis?.crypto).getRandomValues(Je(e)),vn=BigInt,Le=(e,n,t,o="bad number: out of range")=>typeof e!="bigint"?J(o,TypeError):n<=e&&e<t?e:J(o,RangeError),A=(e,n=Se)=>{let t=e%n;return t>=0n?t:n+t},on=e=>A(e,Fe),Fr=(e,n)=>{(e===0n||n<=0n)&&J("no inverse n="+e+" mod="+n);let t=A(e,n),o=n,a=0n,s=1n,r=1n,i=0n;for(;t!==0n;){let f=o/t,m=o%t,d=a-r*f,c=s-i*f;o=t,t=m,a=r,s=i,r=d,i=c}return o===1n?A(a,n):J("no inverse")},bt=e=>{let n=Yr[e];return typeof n!="function"&&J("hashes."+e+" not set"),n},ut=(e,n,t)=>ce(bt(e)(n,t),re,"digest"),dt=(e,n,t)=>Promise.resolve(bt(e)(n,t)).then(o=>ce(o,re,"digest"));var Pn=e=>e instanceof Te?e:J("Point expected"),St=e=>A(A(e*e)*e+wt),mt=e=>Le(e,0n,Se),nn=e=>Le(e,1n,Se),Wr=e=>Le(e,1n,Fe),sn=e=>!(e&1n),Tt=e=>Uint8Array.of(e),Vr=e=>Tt(sn(e)?2:3),Rt=e=>{let n=St(nn(e)),t=1n;for(let o=n,a=(Se+1n)/4n;a>0n;a>>=1n)a&1n&&(t=t*o%Se),o=o*o%Se;return A(t*t)!==n&&J("sqrt invalid"),sn(t)?t:A(-t)};var ge=class ge{constructor(n,t,o){ne(this,"X");ne(this,"Y");ne(this,"Z");this.X=mt(n),this.Y=nn(t),this.Z=mt(o),Object.freeze(this)}static CURVE(){return pt}static fromAffine(n){let{x:t,y:o}=n;return t===0n&&o===0n?De:new ge(t,o,1n)}static fromBytes(n){ce(n);let{publicKey:t,publicKeyUncompressed:o}=kn,a,s=n.length,r=n[0],i=n.subarray(1),f=tn(i,0,re);if(s===t&&(r===2||r===3)){let m=Rt(f);r===3&&(m=A(-m)),a=new ge(f,m,1n)}return s===o&&r===4&&(a=new ge(f,tn(i,re,je),1n)),a?a.assertValidity():J("bad point: not on curve")}static fromHex(n){return ge.fromBytes(vt(n))}get x(){return this.toAffine().x}get y(){return this.toAffine().y}equals(n){let{X:t,Y:o,Z:a}=this,{X:s,Y:r,Z:i}=Pn(n),f=A(t*i),m=A(s*a),d=A(o*i),c=A(r*a);return f===m&&d===c}is0(){return this.equals(De)}negate(){return new ge(this.X,A(-this.Y),this.Z)}double(){return this.add(this)}add(n){let{X:t,Y:o,Z:a}=this,{X:s,Y:r,Z:i}=Pn(n),f=0n,m=wt,d=0n,c=0n,u=0n,g=A(m*3n),y=A(t*s),v=A(o*r),T=A(a*i),O=A(t+o),w=A(s+r);O=A(O*w),w=A(y+v),O=A(O-w),w=A(t+a);let B=A(s+i);return w=A(w*B),B=A(y+T),w=A(w-B),B=A(o+a),d=A(r+i),B=A(B*d),d=A(v+T),B=A(B-d),u=A(f*w),d=A(g*T),u=A(d+u),d=A(v-u),u=A(v+u),c=A(d*u),v=A(y+y),v=A(v+y),T=A(f*T),w=A(g*w),v=A(v+T),T=A(y-T),T=A(f*T),w=A(w+T),y=A(v*w),c=A(c+y),y=A(B*w),d=A(O*d),d=A(d-y),y=A(O*v),u=A(B*u),u=A(u+y),new ge(d,c,u)}subtract(n){return this.add(Pn(n).negate())}multiply(n,t=!0){if(!t&&n===0n)return De;if(Wr(n),n===1n)return this;if(this.equals(He))return io(n).p;let o=De,a=He;for(let s=this;n>0n;s=s.double(),n>>=1n)n&1n?o=o.add(s):t&&(a=a.add(s));return o}multiplyUnsafe(n){return this.multiply(n,!1)}toAffine(){let{X:n,Y:t,Z:o}=this;if(this.equals(De))return{x:0n,y:0n};if(o===1n)return{x:n,y:t};let a=Fr(o,Se);return A(o*a)!==1n&&J("inverse invalid"),{x:A(n*a),y:A(t*a)}}assertValidity(){let{x:n,y:t}=this.toAffine();return nn(n),nn(t),A(t*t)===St(n)?this:J("bad point: not on curve")}toBytes(n=!0){let{x:t,y:o}=this.assertValidity().toAffine(),a=he(t);return n?Ke(Vr(o),a):Ke(Tt(4),a,he(o))}toHex(n){return kt(this.toBytes(n))}};ne(ge,"BASE"),ne(ge,"ZERO");var Te=ge,He=new Te(qr,zr,1n),De=new Te(0n,1n,0n);Te.BASE=He;Te.ZERO=De;var Gr=(e,n,t)=>He.multiply(n,!1).add(e.multiply(t,!1)).assertValidity(),xe=e=>vn("0x"+(kt(e)||"0")),tn=(e,n,t)=>xe(e.subarray(n,t)),Zr=2n**256n,he=e=>vt(Pt(Le(e,0n,Zr),je)),Xr=e=>{let n=xe(ce(e,re,"secret key"));return Le(n,1n,Fe,"invalid secret key: outside of range")};var gt="SHA-256",Yr={hmacSha256Async:async(e,n)=>{let t=lt(),o="HMAC",a=await t.importKey("raw",e,{name:o,hash:{name:gt}},!1,["sign"]);return Je(await t.sign(o,a,n))},hmacSha256:void 0,sha256Async:async e=>Je(await lt().digest(gt,e)),sha256:void 0};var Qr=e=>{if(e=e===void 0?Rn(kn.seed):e,ce(e),e.length<kn.seed||e.length>1024)return J("expected 48-1024b",RangeError);let n=A(xe(e),Fe-1n);return he(n+1n)},eo=e=>n=>{let t=Qr(n);return{secretKey:t,publicKey:e(t)}};var At=e=>Uint8Array.from("BIP0340/"+e,n=>n.charCodeAt(0)),Et="aux",Mt="nonce",Bt="challenge",bn=(e,...n)=>{let t=ut("sha256",At(e));return ut("sha256",Ke(t,t,...n))},Sn=(e,...n)=>dt("sha256Async",At(e)).then(t=>dt("sha256Async",Ke(t,t,...n))),An=e=>{let n=Xr(e),t=He.multiply(n),{x:o,y:a}=t.assertValidity().toAffine(),s=sn(a)?n:on(-n),r=he(o);return{d:s,px:r}},En=e=>on(xe(e)),Ot=(...e)=>En(bn(Bt,...e)),Ct=async(...e)=>En(await Sn(Bt,...e)),Dt=e=>An(e).px,no=eo(Dt),Lt=(e,n,t)=>{let{px:o,d:a}=An(n);return{m:ce(e),px:o,d:a,a:ce(t,re)}},Ht=e=>{let n=En(e);n===0n&&J("sign failed: k is zero");let{px:t,d:o}=An(he(n));return{rx:t,k:o}},xt=(e,n,t,o)=>Ke(n,he(on(e+t*o))),_t="invalid signature produced",to=(e,n,t=Rn(re))=>{let{m:o,px:a,d:s,a:r}=Lt(e,n,t),i=bn(Et,r),f=he(s^xe(i)),m=bn(Mt,f,a,o),{rx:d,k:c}=Ht(m),u=Ot(d,a,o),g=xt(c,d,u,s);return It(g,o,a)||J(_t),g},ro=async(e,n,t=Rn(re))=>{let{m:o,px:a,d:s,a:r}=Lt(e,n,t),i=await Sn(Et,r),f=he(s^xe(i)),m=await Sn(Mt,f,a,o),{rx:d,k:c}=Ht(m),u=await Ct(d,a,o),g=xt(c,d,u,s);return await Ut(g,o,a)||J(_t),g},oo=(e,n)=>e instanceof Promise?e.then(n):n(e),Nt=(e,n,t,o)=>{let a=ce(e,je,"signature"),s=ce(n,void 0,"message"),r=ce(t,re,"publicKey");try{let i=xe(r),f=Rt(i),m=new Te(i,f,1n).assertValidity(),d=he(m.toAffine().x),c=tn(a,0,re);Le(c,1n,Se);let u=tn(a,re,je);Le(u,1n,Fe);let g=Ke(he(c),d,s);return oo(o(g),y=>{let{x:v,y:T}=Gr(m,u,on(-y)).toAffine();return!(!sn(T)||v!==c)})}catch{return!1}},It=(e,n,t)=>Nt(e,n,t,Ot),Ut=async(e,n,t)=>Nt(e,n,t,Ct),Mn=Object.freeze({keygen:no,getPublicKey:Dt,sign:to,verify:It,signAsync:ro,verifyAsync:Ut}),rn=8,so=256,jt=Math.ceil(so/rn)+1,Tn=2**(rn-1),ao=()=>{let e=[],n=He,t=n;for(let o=0;o<jt;o++){t=n,e.push(t);for(let a=1;a<Tn;a++)t=t.add(n),e.push(t);n=t.double()}return e},ht,yt=(e,n)=>{let t=n.negate();return e?t:n},io=e=>{let n=ht||(ht=ao()),t=De,o=He,a=2**rn,s=a,r=vn(a-1),i=vn(rn);for(let f=0;f<jt;f++){let m=Number(e&r);e>>=i,m>Tn&&(m-=s,e+=1n);let d=f*Tn,c=d,u=d+Math.abs(m)-1,g=f%2!==0,y=m<0;m===0?o=o.add(yt(g,n[c])):t=t.add(yt(y,n[u]))}return e!==0n&&J("invalid wnaf"),{p:t,f:o}};var{floor:Bn,min:co,sin:fo}=Math,X="Trystero",Re=(e,n)=>Array(e).fill(void 0).map(n),lo="0123456789AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz",fe=e=>Re(e,()=>lo[Bn(Math.random()*62)]??"").join(""),Y=fe(20),se=Promise.all.bind(Promise),Cn=typeof window<"u",{entries:de,fromEntries:Dn,keys:te,values:we}=Object,Z=()=>{},an="candidate",_=e=>(e!==null&&clearTimeout(e),null),N=e=>new Error(`${X}: ${e}`),Pe=(e,n)=>e instanceof Error&&e.message?e.message:typeof e=="string"&&e?e:Q(e??n),le=(e,n)=>e instanceof Error?e:N(Pe(e,n)),uo=new TextEncoder,mo=new TextDecoder,ue=e=>uo.encode(e),me=e=>mo.decode(e),ke=e=>e.reduce((n,t)=>n+t.toString(16).padStart(2,"0"),""),_e=(...e)=>e.join("@"),go=(e,n)=>{let t=[...e],o=()=>{let s=fo(n++)*1e4;return s-Bn(s)},a=t.length;for(;a;){let s=Bn(o()*a--),r=t[a];t[a]=t[s],t[s]=r}return t},Ln=(e,n,t,o=!1)=>e.relayConfig?.urls||(o?go(n,cn(e.appId)):n).slice(0,e.relayConfig?.redundancy??t),Q=JSON.stringify,ye=e=>{try{return JSON.parse(e)}catch{throw N(`failed to parse JSON: ${e}`)}},cn=(e,n=Number.MAX_SAFE_INTEGER)=>e.split("").reduce((t,o)=>t+o.charCodeAt(0),0)%n,Kt=3333,ho=6e4,We={},Ve=null,On=null,Hn=()=>{Ve||(Ve=new Promise(e=>{On=e}).finally(()=>{On=null,Ve=null}))},xn=()=>{On?.()},_n=(e,n,t)=>{let o={},a=!1,s=Z;o.ready=new Promise(i=>s=i);let r=()=>{let i=new WebSocket(e);i.onclose=()=>{if(Ve){Ve.then(r);return}let f=We[e]??(We[e]=Kt);setTimeout(r,Math.random()*f),We[e]=co(f*2,ho)},i.onmessage=f=>n(String(f.data)),o.socket=i,o.url=i.url,i.onopen=()=>{let f=a;a=!0,s(o),We[e]=Kt,f&&t?.()},o.send=f=>{i.readyState===1&&i.send(f)}};return r(),o};var Nn=e=>{let n={},t=new WeakMap,o=s=>{let r=t.get(s);if(!r)throw N("relay bookkeeping missing registration for relay client");return r};return{register:(s,r)=>(n[s]=r,t.set(r,s),r),keyOf:o,scoped:()=>{let s={},r=i=>s[i]??(s[i]={});return{forKey:r,forRelay:i=>r(o(i))}},getSockets:()=>Dn(de(n).flatMap(([s,r])=>{let i=e(r);return i?[[s,i]]:[]}))}},$t=()=>{if(Cn){let e=new AbortController;return addEventListener("online",xn,{signal:e.signal}),addEventListener("offline",Hn,{signal:e.signal}),()=>e.abort()}return Z};var Un="AES-GCM",In={},yo=e=>btoa(String.fromCharCode.apply(null,Array.from(new Uint8Array(e)))),po=e=>{let n=atob(e);return new Uint8Array(n.length).map((t,o)=>n.charCodeAt(o)).buffer},Ne=async(e,n)=>new Uint8Array(await crypto.subtle.digest(e,ue(n))),Ae=async e=>In[e]??(In[e]=Array.from(await Ne("SHA-1",e)).map(n=>n.toString(36)).join("")),qt=async(e,n,t)=>crypto.subtle.importKey("raw",await crypto.subtle.digest({name:"SHA-256"},ue(`${e}:${n}:${t}`)),{name:Un},!1,["encrypt","decrypt"]),zt=async(e,n)=>ke(await Ne("SHA-256",`${X}:${e}:${n}`)),Jt="$",Ft=",",Wt=async(e,n)=>{let t=crypto.getRandomValues(new Uint8Array(16));return t.join(Ft)+Jt+yo(await crypto.subtle.encrypt({name:Un,iv:t},await e,ue(n)))},Vt=async(e,n)=>{let[t,o]=n.split(Jt);return me(await crypto.subtle.decrypt({name:Un,iv:new Uint8Array(t?.split(Ft).map(Number)??[])},await e,po(o??"")))};var Ge=57333,wo=18e4,Po=20,Gt=class{constructor(e){ne(this,"makeOffer");ne(this,"pool",[]);ne(this,"pooled",new Set);ne(this,"leased",new Map);ne(this,"recycling",new Set);ne(this,"cleanupTimer",null);ne(this,"active",!1);this.makeOffer=e}get isActive(){return this.active}warmup(){this.pool=[],this.pooled.clear(),Re(Po,this.makeOffer).forEach(e=>this.push(e)),this.active=!0,this.cleanupTimer=setInterval(()=>{this.pool=this.pool.filter(e=>e.isDead?(this.pooled.delete(e),!1):!0)},Ge)}push(e){e.isDead||this.pooled.has(e)||this.leased.has(e)||(this.pool.push(e),this.pooled.add(e))}shift(e){let n=[];for(;n.length<e&&this.pool.length>0;){let t=this.pool.shift();if(!t)break;this.pooled.delete(t),n.push(t)}return n}claimLeased(e){let n=this.leased.get(e);n&&(_(n),this.leased.delete(e))}recycle(e){if(!(e.isDead||this.recycling.has(e))){if(e.connection.remoteDescription){e.destroy();return}if(!this.active){e.destroy();return}this.recycling.add(e),e.setHandlers({connect:Z,close:Z,error:Z}),e.getOffer(!0).then(n=>{if(!n||n.type!=="offer"||e.isDead||!this.active){e.destroy();return}this.push(e)}).catch(()=>e.destroy()).finally(()=>this.recycling.delete(e))}}reclaimLeased(e){let n=this.leased.get(e);n&&(_(n),this.leased.delete(e),this.recycle(e))}lease(e){this.claimLeased(e),this.leased.set(e,setTimeout(()=>{this.leased.delete(e),this.recycle(e)},wo))}checkout(e,n,t){let o=this.shift(e),a=Math.max(0,e-o.length);a>0&&o.push(...Re(a,this.makeOffer));let s=async(r,i=!1)=>{try{let f=await t(r);return n?(this.lease(r),{peer:r,offer:f,claim:()=>this.claimLeased(r),reclaim:()=>this.reclaimLeased(r)}):{peer:r,offer:f}}catch(f){if(this.claimLeased(r),this.pooled.delete(r),r.destroy(),!i)return s(this.makeOffer(),!0);throw f}};return se(o.map(r=>s(r)))}getOffers(e,n){return this.checkout(e,!0,n)}destroy(){this.active=!1,this.cleanupTimer&&(clearInterval(this.cleanupTimer),this.cleanupTimer=null),this.pool.forEach(e=>e.destroy()),this.pool=[],this.pooled.clear(),this.leased.forEach((e,n)=>{_(e),n.destroy()}),this.leased.clear(),this.recycling.forEach(e=>e.destroy()),this.recycling.clear()}};var jn=N("incorrect password for overlapping room"),Zt=(e,n,t)=>{let o=r=>Ne("SHA-256",`${r}:${e}:${n}:${t}`).then(ke),a=async(r,i,f)=>{if(!e)return;if(f){let d=fe(36);await r({__trystero_pw:"challenge",c:d});let{data:c}=await i();if(!c||typeof c!="object"||c.__trystero_pw!=="response"||typeof c.h!="string")throw jn;let u=await o(d);if(c.h!==u)throw jn;return}let{data:m}=await i();if(!m||typeof m!="object"||m.__trystero_pw!=="challenge"||typeof m.c!="string")throw jn;await r({__trystero_pw:"response",h:await o(m.c)})};return{run:a,compose:r=>e||r?async(i,f,m,d)=>{await a(f,m,d),await r?.(i,f,m,d)}:void 0}},ko=e=>{let n=Pe(e,"unknown error");return n.startsWith("handshake ")?n:`handshake failed: ${n}`},Xt=({onPeerHandshake:e,onHandshakeError:n,handshakeTimeoutMs:t,sendHandshakeData:o,sendHandshakeReady:a,onActivate:s,onFailure:r})=>{let i={},f=(c,u)=>{let g=i[c];!g||u&&g.peer!==u||g.isActive||!g.didLocalHandshakePass||!g.didReceiveRemoteReady||(g.isActive=!0,g.handshakeTimer=_(g.handshakeTimer),s(c,g.peer))},m=(c,u,g)=>{let y=i[c];if(!y||y.peer!==u)return;let v=ko(g);n?.(c,v),r(c,u,N(v))},d=(c,u)=>{let g=i[c];!g||g.peer!==u||g.isActive||(g.didLocalHandshakePass=!0,a("",c).catch(y=>m(c,u,N(`failed sending handshake readiness: ${Pe(y,"unknown send failure")}`))),f(c,u))};return{addPeer:(c,u)=>{i[c]={peer:u,isActive:!1,didLocalHandshakePass:!1,didReceiveRemoteReady:!1,handshakeTimer:null,pendingHandshakePayloads:[],handshakeWaiters:[]}},clearPeer:(c,u)=>{let g=i[c];g&&(g.handshakeTimer=_(g.handshakeTimer),g.pendingHandshakePayloads.length=0,g.handshakeWaiters.splice(0).forEach(y=>y.reject(u)),delete i[c])},canReceiveFromPeer:(c,u)=>{let g=i[c];return!!(g&&(g.isActive||u))},start:(c,u)=>{let g=i[c];if(!g||g.peer!==u)return;g.handshakeTimer=setTimeout(()=>m(c,u,N(`handshake timed out after ${t}ms`)),t);let y=async(O,w)=>{await o(O,c,w)},v=()=>new Promise((O,w)=>{let B=i[c];if(!B||B.peer!==u){w(N("peer disconnected during handshake"));return}let L=B.pendingHandshakePayloads.shift();if(L){O(L);return}B.handshakeWaiters.push({resolve:O,reject:R=>w(R)})}),T=Y<c;Promise.resolve(e?.(c,y,v,T)).then(()=>d(c,u)).catch(O=>m(c,u,le(O,"handshake failed")))},receiveHandshakeData:(c,u,g)=>{let y=i[u];if(!y||y.isActive)return;let v=g===void 0?{data:c}:{data:c,metadata:g},T=y.handshakeWaiters.shift();if(T){T.resolve(v);return}y.pendingHandshakePayloads.push(v)},receiveHandshakeReady:c=>{let u=i[c];!u||u.isActive||(u.didReceiveRemoteReady=!0,f(c))}}};var vo=15e3,bo=5e3,Yt="icegatheringstatechange",So="iceconnectionstatechange",Ze="offer",To="answer",Ro=/out of range/i,Qt=e=>e.replace(/ (\S+\.local) (\d+) typ host/g," 127.0.0.1 $2 typ host"),Kn=(e,{trickleIce:n,rtcConfig:t,rtcPolyfill:o,turnConfig:a,_test_only_mdnsHostFallbackToLoopback:s})=>{let r=new(o??RTCPeerConnection)({iceServers:Ao.concat(a??[]),...t}),i={},f=[],m=[],d=n!==!1,c=[],u=[],g=!1,y=!1,v=null,T=null,O=!1,w=()=>T=_(T),B=()=>{O||(O=!0,w(),i.close?.())},L=h=>{i.signal?i.signal(h):f.push(h)},R=h=>{let k=i.signal;i.signal=x=>{k?.(x),h(x)},f.length>0&&f.splice(0).forEach(x=>i.signal?.(x))},E=h=>s?Qt(h):h,j=h=>{if(!s||typeof h.candidate!="string")return h;let k=Qt(h.candidate);return k===h.candidate?h:{...h,candidate:k}},b=h=>({type:h.localDescription?.type??Ze,sdp:E(h.localDescription?.sdp??"")}),q=()=>{let h=r.remoteDescription?.sdp;return h?h.match(/a=ice-ufrag:([^\s]+)/)?.[1]??null:null},F=()=>(r.remoteDescription?.sdp?.match(/^m=/gm)??[]).length,$=h=>{if(!r.remoteDescription)return!1;let k=F();if(typeof h.sdpMLineIndex=="number"&&k>0&&h.sdpMLineIndex>=k)return!1;let x=q();return!(x&&h.usernameFragment&&h.usernameFragment!==x)},W=async h=>{try{return await r.addIceCandidate(h),!0}catch(k){if(k instanceof Error&&Ro.test(k.message)&&typeof h.sdpMLineIndex=="number")return!1;throw k}},V=async()=>{if(!r.remoteDescription||c.length===0)return;let h=c.splice(0),k=[];for(let x of h){if(!$(x)){k.push(x);continue}await W(x)||k.push(x)}k.length>0&&c.push(...k)},l=async h=>{if($(h)){await W(h)||c.push(h);return}c.push(h)},p=h=>{h.binaryType="arraybuffer",h.bufferedAmountLowThreshold=65535,h.onmessage=k=>{let x=k.data;i.data?i.data(x):m.push(x)},h.onopen=()=>i.connect?.(),h.onclose=B,h.onerror=({error:k})=>i.error?.(le(k,"data channel error"))},S=async h=>{let k=null;try{await Promise.race([new Promise(x=>{let z=()=>{h.iceGatheringState==="complete"&&(h.removeEventListener(Yt,z),x())};h.addEventListener(Yt,z),z()}),new Promise(x=>{k=setTimeout(x,vo)})])}finally{_(k)}return b(h)},P=async()=>{let h=d?b(r):await S(r);return L(h),h};e?(v=r.createDataChannel("data"),p(v)):r.ondatachannel=({channel:h})=>{v=h,p(h)};let M=async(h=!1)=>{if(r.connectionState!=="closed")try{return g=!0,h&&(r.signalingState!=="stable"&&r.signalingState!=="closed"&&r.localDescription?.type===Ze&&await r.setLocalDescription({type:"rollback"}),typeof r.restartIce=="function"&&r.restartIce()),await r.setLocalDescription(h?await r.createOffer({iceRestart:!0}):void 0),await P()}catch(k){i.error?.(le(k,"failed to create local offer"))}finally{g=!1}};r.onnegotiationneeded=async()=>M(!1),r.onicecandidate=({candidate:h})=>{if(!d||!h)return;let k=j(typeof h.toJSON=="function"?h.toJSON():{candidate:h.candidate,sdpMid:h.sdpMid,sdpMLineIndex:h.sdpMLineIndex,usernameFragment:h.usernameFragment});L({type:an,sdp:JSON.stringify(k)})};let I=()=>{if(r.connectionState==="failed"||r.connectionState==="closed"||r.iceConnectionState==="failed"||r.iceConnectionState==="closed"){B();return}if(r.connectionState==="connected"||r.connectionState==="connecting"||r.iceConnectionState==="connected"||r.iceConnectionState==="completed"||r.iceConnectionState==="checking"){w();return}if(r.connectionState==="disconnected"||r.iceConnectionState==="disconnected"){T||(T=setTimeout(()=>{T=null,(r.connectionState==="disconnected"||r.iceConnectionState==="disconnected")&&B()},bo));return}};r.onconnectionstatechange=I,r.addEventListener(So,I),r.ontrack=h=>{let k=h.streams[0];if(k){if(!i.track&&!i.stream){u.push({track:h.track,stream:k});return}i.track?.(h.track,k),i.stream?.(k)}},r.onremovestream=h=>i.stream?.(h.stream);let K=e?new Promise(h=>R(k=>{k.type===Ze&&h(k)})):Promise.resolve();return e&&queueMicrotask(()=>{!g&&r.signalingState==="stable"&&!r.localDescription&&r.connectionState!=="closed"&&r.onnegotiationneeded?.(new Event("negotiationneeded"))}),{created:Date.now(),connection:r,get channel(){return v},get isDead(){return r.connectionState==="closed"},getOffer:async(h=!1)=>{if(e)return h?M(!0):r.localDescription?.type===Ze?d?b(r):S(r):K},async signal(h){if(h.type==="candidate"){try{let k=JSON.parse(h.sdp);k&&typeof k=="object"&&await l(j(k))}catch(k){i.error?.(le(k,"failed to parse remote candidate"))}return}if(!(v?.readyState==="open"&&!h.sdp?.includes("a=rtpmap")))try{let k={...h,sdp:E(h.sdp)};if(h.type===Ze){if(g||r.signalingState!=="stable"&&!y){if(e)return;await se([r.setLocalDescription({type:"rollback"}),r.setRemoteDescription(k)])}else await r.setRemoteDescription(k);return await V(),await r.setLocalDescription(),await P()}if(h.type===To){y=!0;try{await r.setRemoteDescription(k),await V()}finally{y=!1}}}catch(k){i.error?.(le(k,"failed to apply remote signal"))}},sendData:h=>v?.send(h),destroy:()=>{w(),v?.close(),r.close(),g=!1,y=!1,B()},setHandlers:h=>{let{signal:k,...x}=h;Object.assign(i,x),i.data&&m.length>0&&m.splice(0).forEach(z=>i.data?.(z)),k&&R(k),(i.track||i.stream)&&u.length>0&&u.splice(0).forEach(({track:z,stream:ve})=>{i.track?.(z,ve),i.stream?.(ve)})},offerPromise:K,addStream:h=>h.getTracks().forEach(k=>r.addTrack(k,h)),removeStream:h=>r.getSenders().filter(k=>k.track&&h.getTracks().includes(k.track)).forEach(k=>r.removeTrack(k)),addTrack:(h,k)=>r.addTrack(h,k),removeTrack:h=>{let k=r.getSenders().find(x=>x.track===h);k&&r.removeTrack(k)},replaceTrack:(h,k)=>{let x=r.getSenders().find(z=>z.track===h);if(x)return x.replaceTrack(k)}}},Ao=[...Re(3,(e,n)=>`stun:stun${n||""}.l.google.com:19302`),"stun:stun.cloudflare.com:3478"].map(e=>({urls:e}));var Eo=Object.getPrototypeOf(Uint8Array),$n=32,Mo=0,qn=32,er=34,zn=35,fn=36,Ie=16*2**10-fn,Xe=255,Bo=65535,nr="bufferedamountlow",tr="close",rr="error",Oo=1e4,Co=e=>e instanceof ArrayBuffer?new Uint8Array(e):new Uint8Array(e.buffer,e.byteOffset,e.byteLength),Do=(e,n=Oo)=>e.readyState!=="open"||e.bufferedAmount<=e.bufferedAmountLowThreshold?Promise.resolve(e.readyState==="open"):new Promise(t=>{let o=!1,a=null,s=f=>{o||(o=!0,e.removeEventListener(nr,r),e.removeEventListener(tr,i),e.removeEventListener(rr,i),_(a),t(f))},r=()=>s(!0),i=()=>s(!1);if(e.addEventListener(nr,r),e.addEventListener(tr,i),e.addEventListener(rr,i),a=setTimeout(()=>s(!1),n),e.readyState!=="open"){s(!1);return}e.bufferedAmount<=e.bufferedAmountLowThreshold&&s(!0)}),or=({getPeer:e,getPeerIds:n,canReceiveFromPeer:t,throwIfAborted:o})=>{let a={},s={},r={},i={},f=(c,u,{includePending:g=!1}={})=>(c?Array.isArray(c)?c:[c]:n(g)).flatMap(y=>{let v=e(y,g);return v?[Promise.resolve(u(y,v))]:(console.warn(`${X}: no peer with id ${y} found`),[])});return{makeInternalAction:(c,u={})=>{let g=s[c];if(a[c]&&g){let w=a[c].options;if(w.sendToPending!==!!u.sendToPending||w.receiveWhilePending!==!!u.receiveWhilePending)throw N(`action type "${c}" cannot be redefined`);return g}if(!c)throw N("action type argument is required");let y=ue(c);if(y.byteLength>$n)throw N(`action type string "${c}" (${y.byteLength}b) exceeds byte limit (${$n}). Hint: choose a shorter name.`);let v={sendToPending:!!u.sendToPending,receiveWhilePending:!!u.receiveWhilePending},T=new Uint8Array($n);T.set(y);let O=0;return a[c]={onComplete:Z,onProgress:Z,setOnComplete:w=>{a[c].onComplete=w;let B=i[c];B?.length&&(delete i[c],B.forEach(({payload:L,peerId:R,metadata:E})=>w(L,R,E)))},setOnProgress:w=>{a[c].onProgress=w},send:async(w,B,L,R,E)=>{o(E);let j=typeof w;if(j==="undefined")throw N("action data cannot be undefined");let b=j!=="string",q=w instanceof Blob,F=q||w instanceof ArrayBuffer||w instanceof Eo,$=L!==void 0,W=F?Co(q?await w.arrayBuffer():w):ue(b?Q(w):w),V=$?ue(Q(L)):null,l=Math.ceil(W.byteLength/Ie)+($?1:0)||1,p=Re(l,(S,P)=>{let M=P===l-1,I=!!($&&P===0),K=new Uint8Array(fn+(I?V?.byteLength??0:M?W.byteLength-Ie*(l-($?2:1)):Ie));return K.set(T),K.set([O>>8,O&Xe],qn),K.set([Number(M)|Number(I)<<1|Number(F)<<2|Number(b)<<3],er),K.set([Math.round((P+1)/l*Xe)],zn),K.set($?I?V??new Uint8Array:W.subarray((P-1)*Ie,P*Ie):W.subarray(P*Ie,(P+1)*Ie),fn),K});return O=O+1&Bo,await se(f(B,async(S,P)=>{let{channel:M}=P,I=0;for(;I<l;){o(E);let K=p[I];if(!K)break;if(M&&M.bufferedAmount>M.bufferedAmountLowThreshold){let x=await Do(M);if(o(E),!x)break}let h=e(S,v.sendToPending);if(!h||h!==P)break;P.sendData(K),I++;let k=K[zn]??Xe;R?.(k/Xe,S,L)}},{includePending:v.sendToPending})),[]},options:v},s[c]={send:a[c].send,onMessage:a[c].setOnComplete,onProgress:a[c].setOnProgress}},handleData:(c,u)=>{var $,W;let g=new Uint8Array(u),y=me(g.subarray(Mo,qn)).replaceAll("\0",""),v=a[y];if(!t(c,!!v?.options.receiveWhilePending))return;let T=(g[qn]??0)<<8|(g[33]??0),O=g[er]??0,w=g[zn]??0,B=g.subarray(fn),L=!!(O&1),R=!!(O&2),E=!!(O&4),j=!!(O&8);r[c]??(r[c]={}),($=r[c])[y]??($[y]={});let b=(W=r[c][y])[T]??(W[T]={chunks:[]});if(R?b.meta=ye(me(B)):b.chunks.push(B),v?.onProgress(w/Xe,c,b.meta),!L)return;let q=new Uint8Array(b.chunks.reduce((V,l)=>V+l.byteLength,0));b.chunks.reduce((V,l)=>(q.set(l,V),V+l.byteLength),0),delete r[c][y][T];let F=E?q:j?ye(me(q)):me(q);if(v){v.onComplete(F,c,b.meta);return}(i[y]??(i[y]=[])).push({payload:F,peerId:c,...b.meta===void 0?{}:{metadata:b.meta}})},clearPeer:c=>{delete r[c]}}};var Lo=500,$e=(e,n)=>{let t=N(n);return t.kind=e,t.name=e==="aborted"?"AbortError":t.name,t},Jn=e=>{if(e?.aborted)throw $e("aborted","operation aborted")},sr=e=>e&&typeof e=="object"&&!Array.isArray(e)&&typeof e.r=="string"?{r:e.r,...Object.hasOwn(e,"m")?{m:e.m}:{}}:null,Ho=e=>e&&typeof e=="object"&&!Array.isArray(e)&&typeof e.r=="string"?{r:e.r,...typeof e.e=="string"?{e:e.e}:{}}:null,ln=(e,n)=>n===void 0?e:{...e,metadata:n},ar=({getPeer:e,getPeerIds:n,canReceiveFromPeer:t})=>{let o={},a={},s=or({getPeer:e,getPeerIds:n,canReceiveFromPeer:t,throwIfAborted:Jn}),r=s.makeInternalAction,i=s.handleData,f=g=>{let y=a[g];y&&(_(y.timer),y.signal&&y.abortHandler&&y.signal.removeEventListener("abort",y.abortHandler),delete a[g])},m=(g,y)=>{de(a).forEach(([v,T])=>{T.peerId===g&&(f(v),T.reject(y))})},d=(g,y)=>{s.clearPeer(g),m(g,$e("disconnected",Pe(y,"peer disconnected")))},c=r("@_response");return c.onMessage((g,y,v)=>{let T=Ho(v);if(!T)return;let O=a[T.r];if(!(!O||O.peerId!==y)){if(f(T.r),T.e!==void 0){O.reject($e("rejected",T.e));return}O.resolve(g)}}),{makeAction:(g,y)=>{if(y&&"onRequest"in y&&y.kind!=="request")throw N('request actions must use kind: "request"');let v=y?.kind??"message",T=r(g),O=o[g];if(O){if(O.kind!==v)throw N(`action type "${g}" cannot be redefined`);return O.action}let w={kind:v,action:null,pendingMessages:[],pendingRequests:[],onReceiveProgress:y?.onReceiveProgress??null},B=(l,p)=>l?(S,P)=>l(S,ln({peerId:P},p)):void 0,L=l=>{w.onReceiveProgress=l},R=(l,p,S)=>{let P=w.kind==="request"?sr(S):null;w.onReceiveProgress?.(l,ln({peerId:p},P?P.m:S))};if(T.onProgress(R),v==="message"){let l=y?.onMessage??null,p=()=>{if(!l)return;let P=l;w.pendingMessages.splice(0).forEach(({payload:M,peerId:I,metadata:K})=>{Promise.resolve().then(()=>P(M,ln({peerId:I},K))).catch(h=>console.error(`${X} action handler error:`,h))})},S={send:async(P,M={})=>{await T.send(P,M.target,M.metadata,B(M.onProgress,M.metadata),M.signal)},get onMessage(){return l},set onMessage(P){l=P,p()},get onReceiveProgress(){return w.onReceiveProgress},set onReceiveProgress(P){L(P)}};return T.onMessage((P,M,I)=>{if(!l){w.pendingMessages.push(I===void 0?{payload:P,peerId:M}:{payload:P,peerId:M,metadata:I});return}let K=l;Promise.resolve().then(()=>K(P,ln({peerId:M},I))).catch(h=>console.error(`${X} action handler error:`,h))}),w.action=S,o[g]=w,p(),S}let E=y?.onRequest??null,j=l=>{_(l.timer);let p=w.pendingRequests.indexOf(l);p>-1&&w.pendingRequests.splice(p,1)},b=(l,p,S)=>{c.send(null,l,{r:p,e:Pe(S,"request failed")})},q=(l,p)=>{j(l),Promise.resolve().then(()=>p(l.payload,{peerId:l.peerId,...l.metadata===void 0?{}:{metadata:l.metadata},signal:l.controller.signal})).then(async S=>{if(S===void 0)throw N("request handler returned undefined");await c.send(S,l.peerId,{r:l.requestId})}).catch(S=>b(l.peerId,l.requestId,S)).finally(()=>l.controller.abort())},F=()=>{E&&w.pendingRequests.slice().forEach(l=>q(l,E))},$=(l,p,S,P)=>{if(E){q({payload:l,peerId:p,...S===void 0?{}:{metadata:S},requestId:P,controller:new AbortController,timer:null},E);return}let M={payload:l,peerId:p,...S===void 0?{}:{metadata:S},requestId:P,controller:new AbortController,timer:setTimeout(()=>{j(M),M.controller.abort(),b(p,P,"request handler unavailable")},Lo)};w.pendingRequests.push(M)},W=async(l,p)=>{let{target:S,metadata:P,onProgress:M,signal:I,timeoutMs:K}=p;if(Jn(I),!e(S,!1))throw $e("disconnected",`no active peer with id ${S}`);let h=fe(20),k=new Promise((x,z)=>{let ve={peerId:S,resolve:x,reject:z,timer:null,...I===void 0?{}:{signal:I}},be=()=>{f(h),z($e("aborted","operation aborted"))};I&&(ve.abortHandler=be,I.addEventListener("abort",be,{once:!0})),a[h]=ve}).catch(x=>{throw x});try{await T.send(l,S,P===void 0?{r:h}:{r:h,m:P},B(M,P),I);let x=a[h];return x&&K!==void 0&&(x.timer=setTimeout(()=>{f(h),x.reject($e("timeout","request timed out"))},K)),await k}catch(x){throw f(h),x}},V={request:W,requestMany:async(l,p)=>(Jn(p.signal),await se(p.targets.map(async S=>{try{let P={peerId:S,status:"fulfilled",value:await W(l,{target:S,...p.metadata===void 0?{}:{metadata:p.metadata},...p.timeoutMs===void 0?{}:{timeoutMs:p.timeoutMs},...p.onProgress===void 0?{}:{onProgress:p.onProgress},...p.signal===void 0?{}:{signal:p.signal}})};return p.onResult?.(P),P}catch(P){let M=le(P,"request failed");if(M.kind==="aborted"||!M.kind)throw M;let I=M.kind==="timeout"?{peerId:S,status:"timeout"}:M.kind==="disconnected"?{peerId:S,status:"disconnected"}:{peerId:S,status:"rejected",error:M};return p.onResult?.(I),I}}))),get onRequest(){return E},set onRequest(l){E=l,F()},get onReceiveProgress(){return w.onReceiveProgress},set onReceiveProgress(l){L(l)}};return T.onMessage((l,p,S)=>{let P=sr(S);P&&$(l,p,P.m,P.r)}),w.action=V,o[g]=w,F(),V},makeInternalAction:r,handleData:i,clearPeer:d}};var ir=e=>e&&typeof e=="object"&&!Array.isArray(e)&&typeof e.k=="string"?{key:e.k,...typeof e.s=="string"?{streamId:e.s}:{},...typeof e.t=="string"?{trackId:e.t}:{},...Object.hasOwn(e,"m")?{metadata:e.m}:{}}:null,cr=e=>n=>{let t=e.get(n);return t||(t=fe(20),e.set(n,t)),t},Fn=()=>{let e=new WeakMap,n=new WeakMap,t=new Map,o=new Map,a=new Map,s=new Map;return{getStreamKey:cr(e),getTrackKey:cr(n),rememberRemoteStream:(r,i,f)=>{t.set(r,i),f&&o.set(f,i)},getRemoteStream:(r,i)=>t.get(r)??(i?o.get(i):void 0),rememberRemoteTrack:(r,i,f,m,d)=>{let c={track:i,stream:f};a.set(r,c),m&&s.set(m,c),d&&o.set(d,f)},getRemoteTrack:(r,i)=>a.get(r)??(i?s.get(i):void 0),clearRemote:()=>{t.clear(),o.clear(),a.clear(),s.clear()}}},fr=({iterate:e,isActive:n,getSharedMediaPeer:t})=>{let o={},a={},s=Fn(),r={onPeerStream:null,onPeerTrack:null},i=(d,c,u,g)=>{n(d)&&(t(d)?.__trysteroMedia?.rememberRemoteStream(c,u,typeof u.id=="string"?u.id:void 0),r.onPeerStream?.(u,d,g))},f=(d,c,u,g,y)=>{n(d)&&(t(d)?.__trysteroMedia?.rememberRemoteTrack(c,u,g,typeof u.id=="string"?u.id:void 0,typeof g.id=="string"?g.id:void 0),r.onPeerTrack?.(u,g,d,y))},m=(d,c,u,g,y,v={})=>{let T={k:c,...v,...u===void 0?{}:{m:u}};return e(d,async(O,w)=>{await g(T,O),y(w)})};return{addStream:(d,c,u)=>m(c.target,s.getStreamKey(d),c.metadata,u,g=>g.addStream(d),{s:d.id}),removeStream:(d,c)=>{e(c,(u,g)=>g.removeStream(d))},addTrack:(d,c,u,g)=>m(u.target,s.getTrackKey(d),u.metadata,g,y=>y.addTrack(d,c),{s:c.id,t:d.id}),removeTrack:(d,c)=>{e(c,(u,g)=>g.removeTrack(d))},replaceTrack:(d,c,u,g)=>m(u.target,s.getTrackKey(c),u.metadata,g,y=>y.replaceTrack(d,c),{t:d.id}),receiveStreamMeta:(d,c)=>{if(!n(c))return;let u=ir(d);if(!u)return;let g=t(c)?.__trysteroMedia?.getRemoteStream(u.key,u.streamId);if(g){i(c,u.key,g,u.metadata);return}(o[c]??(o[c]=[])).push(u)},receiveTrackMeta:(d,c)=>{if(!n(c))return;let u=ir(d);if(!u)return;let g=t(c)?.__trysteroMedia?.getRemoteTrack(u.key,u.trackId);if(g){f(c,u.key,g.track,g.stream,u.metadata);return}(a[c]??(a[c]=[])).push(u)},receiveRemoteStream:(d,c)=>{if(!n(d))return;let u=o[d]?.shift();u&&i(d,u.key,c,u.metadata)},receiveRemoteTrack:(d,c,u)=>{if(!n(d))return;let g=a[d]?.shift();g&&f(d,g.key,c,u,g.metadata)},clearPeer:d=>{delete o[d],delete a[d]},get onPeerStream(){return r.onPeerStream},set onPeerStream(d){r.onPeerStream=d},get onPeerTrack(){return r.onPeerTrack},set onPeerTrack(d){r.onPeerTrack=d}}};var lr="beforeunload",xo=1e4,Ee=e=>"@_"+e,Ye=new Set,ur=()=>Ye.forEach(e=>e()),_o=e=>(Ye.add(e),Ye.size===1&&addEventListener(lr,ur),()=>{Ye.delete(e),Ye.size||removeEventListener(lr,ur)}),dr=(e,n,t,{onPeerHandshake:o,onHandshakeError:a,handshakeTimeoutMs:s=xo,isPassive:r=!1}={})=>{let i={},f={},m={},d={onPeerJoin:null,onPeerLeave:null},c=Z,u=null,g=(l,p,{includePending:S=!1}={})=>(l?Array.isArray(l)?l:[l]:te(S?i:f)).flatMap(P=>{let M=S?i[P]:f[P];return M?[Promise.resolve(p(P,M))]:(console.warn(`${X}: no peer with id ${P} found`),[])}),y=fr({iterate:(l,p)=>g(l,(S,P)=>p(S,P)),isActive:l=>!!f[l],getSharedMediaPeer:l=>i[l]??null}),v=ar({getPeer:(l,p)=>(p?i:f)[l],getPeerIds:l=>te(l?i:f),canReceiveFromPeer:(l,p)=>!!u?.canReceiveFromPeer(l,p)}),T=v.makeInternalAction,O=v.handleData,w=v.makeAction,B=(l,p=N("peer disconnected"))=>{let S=le(p,"peer disconnected");u?.clearPeer(l,S),delete i[l],delete f[l],v.clearPeer(l,S),m[l]?.splice(0).forEach(P=>P.reject(S)),delete m[l],y.clearPeer(l)},L=(l,p,S)=>{let P=i[l];if(!P||p&&P!==p)return;let M=!!f[l];B(l,S),P.destroy(),M&&d.onPeerLeave?.(l),n(l)},R=async()=>{await $.send(""),await new Promise(l=>setTimeout(l,99)),de(i).forEach(([l,p])=>{p.destroy(),B(l,N("room left"))}),c(),t()},E=T(Ee("ping")),j=T(Ee("pong")),b=T(Ee("signal")),q=T(Ee("stream")),F=T(Ee("track")),$=T(Ee("leave"),{sendToPending:!0,receiveWhilePending:!0}),W=T(Ee("hsdata"),{sendToPending:!0,receiveWhilePending:!0}),V=T(Ee("hsready"),{sendToPending:!0,receiveWhilePending:!0});return u=Xt({...o===void 0?{}:{onPeerHandshake:o},...a===void 0?{}:{onHandshakeError:a},handshakeTimeoutMs:s,sendHandshakeData:W.send,sendHandshakeReady:V.send,onActivate:(l,p)=>{f[l]=p,d.onPeerJoin?.(l)},onFailure:(l,p,S)=>L(l,p,S)}),E.onMessage((l,p)=>j.send("",p)),j.onMessage((l,p)=>{let S=m[p];S?.shift()?.resolve(),S&&!S.length&&delete m[p]}),b.onMessage((l,p)=>{f[p]&&i[p]?.signal(l)}),q.onMessage((l,p)=>y.receiveStreamMeta(l,p)),F.onMessage((l,p)=>y.receiveTrackMeta(l,p)),$.onMessage((l,p)=>L(p,void 0,N("peer left room"))),W.onMessage((l,p,S)=>u?.receiveHandshakeData(l,p,S)),V.onMessage((l,p)=>u?.receiveHandshakeReady(p)),e((l,p)=>{let S=i[p];if(S){if(S===l)return;S.destroy(),B(p,N("peer replaced"))}i[p]=l,u?.addPeer(p,l),l.setHandlers({data:P=>O(p,P),stream:P=>y.receiveRemoteStream(p,P),track:(P,M)=>y.receiveRemoteTrack(p,P,M),signal:P=>{f[p]&&b.send(P,p)},close:()=>L(p,l,N("peer disconnected")),error:P=>{console.error(`${X} peer error:`,P),L(p,l,P)}}),u?.start(p,l)}),Cn&&(c=_o(()=>R().catch(Z))),{makeAction:w,leave:R,ping:async l=>{if(!f[l])throw N(`no active peer with id ${l}`);let p=Date.now();return await new Promise((S,P)=>{let M=m[l]??(m[l]=[]),I=()=>{let h=m[l];if(!h)return;let k=h.indexOf(K);k>-1&&h.splice(k,1),h.length||delete m[l]},K={resolve:()=>{I(),S()},reject:h=>{I(),P(h)}};M.push(K),E.send("",l).catch(h=>K.reject(le(h,"peer disconnected")))}),Date.now()-p},isPassive:()=>r,getPeers:()=>Dn(de(f).map(([l,p])=>[l,p.connection])),addStream:(l,p={})=>y.addStream(l,p,q.send),removeStream:(l,p={})=>{y.removeStream(l,p.target)},addTrack:(l,p,S={})=>y.addTrack(l,p,S,F.send),removeTrack:(l,p={})=>{y.removeTrack(l,p.target)},replaceTrack:(l,p,S={})=>y.replaceTrack(l,p,S,F.send),get onPeerJoin(){return d.onPeerJoin},set onPeerJoin(l){d.onPeerJoin=l,l&&te(f).forEach(p=>l(p))},get onPeerLeave(){return d.onPeerLeave},set onPeerLeave(l){d.onPeerLeave=l},get onPeerStream(){return y.onPeerStream},set onPeerStream(l){y.onPeerStream=l},get onPeerTrack(){return y.onPeerTrack},set onPeerTrack(l){y.onPeerTrack=l}}};var gr=1,hr=2,mr=(e,n)=>{let t=ue(e),o=new Uint8Array(3+t.byteLength+n.byteLength);return o[0]=gr,o[1]=t.byteLength>>>8&255,o[2]=t.byteLength&255,o.set(t,3),o.set(n,3+t.byteLength),o},No=(e,n)=>{let t=ue(e),o=new Uint8Array(4+t.byteLength);return o[0]=hr,o[1]=Number(n),o[2]=t.byteLength>>>8&255,o[3]=t.byteLength&255,o.set(t,4),o},Io=e=>{let n=new Uint8Array(e);if(n.byteLength<3)return null;if(n[0]===gr){let a=(n[1]??0)<<8|(n[2]??0),s=3+a;return a<=0||n.byteLength<s?null:{type:"room",roomToken:me(n.subarray(3,s)),payload:n.subarray(s).slice().buffer}}if(n[0]!==hr||n.byteLength<4)return null;let t=(n[2]??0)<<8|(n[3]??0),o=4+t;return t<=0||n.byteLength<o?null:{type:"presence",roomToken:me(n.subarray(4,o)),isPresent:n[1]===1}},yr=e=>{let{connection:n,channel:t}=e;return e.isDead||n.connectionState==="closed"||n.connectionState==="failed"||n.iceConnectionState==="closed"||n.iceConnectionState==="failed"||t?.readyState==="closing"||t?.readyState==="closed"},pr=e=>{if(yr(e))return"stale";let{channel:n}=e;return!n||n.readyState!=="open"?"transient":"live"},wr=class{constructor(){ne(this,"byApp",{});ne(this,"roomPresenceHandlers",{})}getMap(e){var n;return(n=this.byApp)[e]??(n[e]={})}get(e,n){return this.byApp[e]?.[n]}isPeerStale(e){return yr(e)}getHealth(e){return this.isPeerStale(e)?"stale":"live"}setRoomPresenceHandler(e,n){return this.roomPresenceHandlers[e]=n,()=>{this.roomPresenceHandlers[e]===n&&delete this.roomPresenceHandlers[e]}}sendRoomPresence(e,n,t){e.isClosing||e.peer.isDead||e.peer.sendData(No(n,t))}clear(e,n,{destroyPeer:t}){let o=this.byApp[e],a=o?.[n];if(!a||a.isClosing)return;a.idleTimer=_(a.idleTimer),a.isClosing=!0,t&&!a.peer.isDead&&a.peer.destroy();let s=we(a.bindings);a.bindings={},a.bindingsByToken={},a.controlRoomId=null,delete o[n],s.forEach(r=>{r.handlers.close?.(),r.pendingData.length=0,r.pendingSendData.length=0,r.pendingTracks.length=0}),a.media.clearRemote(),a.pendingDataByToken.clear(),a.remoteRoomTokens.clear(),te(o).length===0&&delete this.byApp[e]}register(e,n,t,o){let a=this.getMap(e),s=a[n];if(s){if(s.idleTimer=_(s.idleTimer),s.peer===t)return s;this.clear(e,n,{destroyPeer:!0})}let r={appId:e,peerId:n,peer:t,bindings:{},bindingsByToken:{},pendingDataByToken:new Map,remoteRoomTokens:new Set,idleTimer:null,controlRoomId:null,streamOwners:new Map,trackOwners:new Map,media:Fn(),idleMs:o,isClosing:!1};return t.setHandlers({data:i=>this.dispatchData(r,i),signal:i=>this.dispatchSignal(r,i),close:()=>this.clear(e,n,{destroyPeer:!1}),error:i=>{console.error(`${X} peer error:`,i),this.clear(e,n,{destroyPeer:!1})},track:(i,f)=>this.dispatchTrack(r,i,f)}),a[n]=r,r}bind(e,n,t,{onDetach:o}){let a=t.bindings[e];if(a)return t.idleTimer=_(t.idleTimer),{proxy:a.proxy,isNew:!1};let s={roomId:e,roomToken:null,roomTokenPromise:n,handlers:{},pendingData:[],pendingSendData:[],pendingTracks:[],detach:Z,proxy:{}},r=()=>{t.bindings[e]&&(this.pruneRoomOwnership(t,e),delete t.bindings[e],s.roomToken&&t.bindingsByToken[s.roomToken]===s&&delete t.bindingsByToken[s.roomToken],t.controlRoomId===e&&(t.controlRoomId=te(t.bindings)[0]??null),o(),this.scheduleIdleTimer(t))},i={created:t.peer.created,get connection(){return t.peer.connection},get channel(){return t.peer.channel},get isDead(){return t.peer.isDead},getOffer:f=>t.peer.getOffer(f),signal:f=>t.peer.signal(f),sendData:f=>{if(!s.roomToken){s.pendingSendData.push(f);return}t.peer.sendData(mr(s.roomToken,f))},destroy:()=>r(),setHandlers:f=>{let{signal:m,...d}=f;Object.assign(s.handlers,d),m&&(s.handlers.signal=m),this.flushBindingQueues(s)},offerPromise:t.peer.offerPromise,addStream:f=>{let m=t.streamOwners.get(f)??new Set,d=m.size===0;m.add(e),t.streamOwners.set(f,m),d&&t.peer.addStream(f)},removeStream:f=>{let m=t.streamOwners.get(f);m&&(m.delete(e),m.size===0&&(t.streamOwners.delete(f),t.peer.removeStream(f)))},addTrack:(f,m)=>{let d=t.trackOwners.get(f)??{stream:m,rooms:new Set},c=d.rooms.size===0;return d.stream=m,d.rooms.add(e),t.trackOwners.set(f,d),c?t.peer.addTrack(f,m):t.peer.connection.getSenders().find(u=>u.track===f)??t.peer.addTrack(f,m)},removeTrack:f=>{let m=t.trackOwners.get(f);m&&(m.rooms.delete(e),m.rooms.size===0&&(t.trackOwners.delete(f),t.peer.removeTrack(f)))},replaceTrack:(f,m)=>{let d=t.trackOwners.get(f);if(d){t.trackOwners.delete(f);let c=t.trackOwners.get(m)??{stream:d.stream,rooms:new Set};d.rooms.forEach(u=>c.rooms.add(u)),t.trackOwners.set(m,c)}return t.peer.replaceTrack(f,m)},__trysteroMedia:t.media};return s.proxy=i,s.detach=r,t.bindings[e]=s,t.controlRoomId??(t.controlRoomId=e),t.idleTimer=_(t.idleTimer),n.then(f=>{if(t.isClosing||t.bindings[e]!==s)return;s.roomToken=f,t.bindingsByToken[f]=s;let m=t.pendingDataByToken.get(f);m?.length&&(s.pendingData.push(...m),t.pendingDataByToken.delete(f)),s.pendingSendData.splice(0).forEach(d=>t.peer.sendData(mr(f,d))),this.flushBindingQueues(s)}),{proxy:i,isNew:!0}}pruneRoomOwnership(e,n){e.streamOwners.forEach((t,o)=>{t.delete(n),t.size===0&&(e.streamOwners.delete(o),e.peer.removeStream(o))}),e.trackOwners.forEach((t,o)=>{t.rooms.delete(n),t.rooms.size===0&&(e.trackOwners.delete(o),e.peer.removeTrack(o))})}scheduleIdleTimer(e){e.isClosing||te(e.bindings).length>0||(e.idleTimer=_(e.idleTimer),e.idleTimer=setTimeout(()=>{let n=this.byApp[e.appId]?.[e.peerId];!n||te(n.bindings).length>0||this.clear(e.appId,e.peerId,{destroyPeer:!0})},e.idleMs))}getSignalBinding(e){if(e.controlRoomId){let t=e.bindings[e.controlRoomId];if(t?.handlers.signal)return t}let n=we(e.bindings).find(t=>!!t.handlers.signal);return n?(e.controlRoomId=n.roomId,n):null}flushBindingQueues(e){let{handlers:n}=e;n.data&&e.pendingData.length>0&&e.pendingData.splice(0).forEach(t=>n.data?.(t)),(n.track||n.stream)&&e.pendingTracks.length&&e.pendingTracks.splice(0).forEach(({track:t,stream:o})=>{n.track?.(t,o),n.stream?.(o)})}dispatchData(e,n){let t=Io(n);if(!t)return;if(t.type==="presence"){t.isPresent?e.remoteRoomTokens.add(t.roomToken):e.remoteRoomTokens.delete(t.roomToken),this.roomPresenceHandlers[e.appId]?.(e.peerId,t.roomToken,t.isPresent);return}let o=e.bindingsByToken[t.roomToken];if(!o){let a=e.pendingDataByToken.get(t.roomToken)??[];a.push(t.payload),e.pendingDataByToken.set(t.roomToken,a);return}o.handlers.data?o.handlers.data(t.payload):o.pendingData.push(t.payload)}dispatchSignal(e,n){this.getSignalBinding(e)?.handlers.signal?.(n)}dispatchTrack(e,n,t){we(e.bindings).forEach(o=>{if(o.handlers.track||o.handlers.stream){o.handlers.track?.(n,t),o.handlers.stream?.(t);return}o.pendingTracks.push({track:n,stream:t})})}};var Uo=23333,jo=12,Ko=7533,$o=23333,Wn="__legacy__",dn="offer-placeholder",qo=["offer","answer","candidate"],zo=e=>{if(typeof e=="string")try{let n=ye(e);return n&&typeof n=="object"?n:null}catch{return null}return e&&typeof e=="object"?e:null},Qe=(e,n)=>typeof e[n]=="string"&&e[n]?e[n]:void 0,Jo=e=>qo.some(n=>n in e&&(typeof e[n]!="string"||e[n]==="")),kr=(e,n,t,o,a,s)=>{e.toCipher(n).then(r=>{e.isLeaving()||!s()||o(t,Q(a(r.sdp)))})},Fo=()=>({status:"idle",offerPeer:null,offerId:null,offerSdp:null,offerInitPromise:null,offerAnswered:!1,offerRelays:[],offerSignalRelays:[],offerSignalBacklog:[],offerRelayTimers:[],offerExpiryTimer:null,connectedPeer:null,connectedPeerUnhealthySinceMs:null,answeringExpiryTimer:null,answeringPeer:null,answerSent:!1,connectionErrorReported:!1,pendingCandidates:{}}),Wo=e=>[...e.turnConfig??[],...e.rtcConfig?.iceServers??[]].some(({urls:n})=>(Array.isArray(n)?n:[n]).some(t=>/^turns?:/i.test(t))),Vo=(e,n)=>`could not connect to peer ${e} after exchanging SDP; ${Wo(n)?"check that your TURN server URLs and credentials are reachable by both peers":"configure TURN servers with turnConfig or rtcConfig.iceServers"}`,gn=(e,n,t)=>{e.isLeaving()||n.connectedPeer||n.connectionErrorReported||(n.connectionErrorReported=!0,e.onJoinError?.({error:Vo(t,e.config),appId:e.appId,peerId:t,roomId:e.roomId}))},qe=(e,n)=>e[n]??(e[n]=Fo()),ae=e=>{e.connectedPeer?e.status="connected":e.answeringPeer?e.status="answering":e.offerPeer||e.offerRelays.some(Boolean)?e.status="offering":e.status="idle"},un=(e,n)=>{e.answeringPeer===n&&(e.answeringExpiryTimer=_(e.answeringExpiryTimer),e.answeringPeer=null,e.answerSent=!1,ae(e))},mn=(e,n,t)=>{e.connectedPeer&&(e.connectedPeer.isDead||e.connectedPeer.destroy(),e.connectedPeer=null,e.connectedPeerUnhealthySinceMs=null,ae(e))},Vn=(e,n)=>{e.offerRelayTimers[n]=_(e.offerRelayTimers[n]),e.offerRelays[n]&&(e.offerRelays[n]=void 0,ae(e))},Pr=(e,n)=>{e?.offerRelays[n]===dn&&Vn(e,n)},Go=e=>{if(e.isDead||e.connection.connectionState==="closed")return!0;try{return!!e.connection.remoteDescription}catch{return!0}},ze=(e,n)=>{let t=e.offerAnswered;e.offerExpiryTimer=_(e.offerExpiryTimer),e.offerInitPromise=null,e.offerRelays.forEach((o,a)=>Vn(e,a)),e.offerRelays=[],e.offerSignalRelays=[],e.offerRelayTimers=[],e.offerSignalBacklog=[],e.offerPeer&&e.offerPeer!==e.connectedPeer&&(t||Go(e.offerPeer)?e.offerPeer.isDead||e.offerPeer.destroy():n.recycle(e.offerPeer)),e.offerPeer=null,e.offerId=null,e.offerSdp=null,e.offerAnswered=!1,e.connectionErrorReported=!1,ae(e)},Zo=(e,n,t,o)=>{_(n.answeringExpiryTimer),n.answeringExpiryTimer=setTimeout(()=>{let a=e.peerStates[t];!a||a.connectedPeer||a.answeringPeer!==o||(a.answerSent&&gn(e,a,t),o.destroy(),un(a,o),e.checkDeactivate())},$o)},Xo=async(e,n,t)=>{let o=t?[t,Wn]:[Wn];for(let a of o){let s=e.pendingCandidates[a];if(s?.length){delete e.pendingCandidates[a];for(let r of s)await n.signal(r)}}},vr=(e,n,t,o=Ge)=>{_(n.offerExpiryTimer);let a=n.offerId;n.offerExpiryTimer=setTimeout(()=>{let s=e.peerStates[t];!s||s.connectedPeer||s.offerId!==a||(s.offerAnswered&&gn(e,s,t),ze(s,e.offerPool),e.checkDeactivate())},o)},Yo=(e,n,t,o)=>n.offerPeer&&n.offerId&&n.offerSdp?Promise.resolve({peer:n.offerPeer,offer:n.offerSdp,offerId:n.offerId}):(n.offerInitPromise||(n.offerInitPromise=(async()=>{let a=(await e.offerPool.checkout(1,!1,e.encryptOffer))[0];if(!a)throw N("failed to allocate offer peer");let{peer:s,offer:r}=a;n.offerPeer=s,n.offerId=fe(jo),n.offerSdp=r,n.offerAnswered=!1,n.connectionErrorReported=!1,n.offerSignalBacklog=[],ae(n);let i=()=>{n.offerPeer===s&&!n.connectedPeer&&(n.offerAnswered&&gn(e,n,t),ze(n,e.offerPool)),e.disconnectPeer(s,t),e.checkDeactivate()};return s.setHandlers({connect:()=>e.connectPeer(s,t,o),signal:f=>{n.offerPeer===s&&(n.offerSignalBacklog.push(f),n.offerSignalRelays.forEach(m=>m?.(f)))},close:i,error:i}),vr(e,n,t),{peer:s,offer:r,offerId:n.offerId}})().finally(()=>n.offerInitPromise=null)),n.offerInitPromise),Qo=async(e,n,t,o,a)=>{if(o){e.attachSharedPeerToRoom(t,o);return}let s=e.peerStates[t];if(!s||s.connectedPeer||s.answeringPeer||s.offerAnswered){Pr(s,n);return}if(s.offerRelays[n]!==dn)return;let[r,i]=await se([Ae(_e(e.rootTopicPlaintext,t)),Yo(e,s,t,n)]);if(e.isLeaving())return;if(s.connectedPeer||s.answeringPeer||s.offerAnswered||s.offerRelays[n]!==dn){Pr(s,n);return}s.offerRelayTimers[n]=_(s.offerRelayTimers[n]),s.offerRelays[n]=!0,ae(s),s.offerRelayTimers[n]=setTimeout(()=>rs(e,t,n),(e.announceIntervals[n]??e.announceIntervalMs)*.9);let f=!1;s.offerSignalRelays[n]=m=>{f&&(e.isLeaving()||s.connectedPeer||s.offerPeer!==i.peer||s.offerId!==i.offerId||m.type!=="candidate"||kr(e,m,r,a,d=>({peerId:Y,offerId:i.offerId,candidate:d,...e.isPassive?{passive:!0}:{}}),()=>!s.connectedPeer&&s.offerPeer===i.peer&&s.offerId===i.offerId))},a(r,Q({peerId:Y,offerId:i.offerId,offer:i.offer,...e.isPassive?{passive:!0}:{}})),f=!0,s.offerSignalBacklog.forEach(m=>s.offerSignalRelays[n]?.(m))},es=async(e,n,t,o,a,s,r)=>{let i=qe(e.peerStates,t);if(i.answeringPeer||i.offerAnswered)return;let f=!!(i.offerPeer||i.offerRelays.some(Boolean));if((f||s)&&Y<t)return;f&&ze(i,e.offerPool);let m=e.initPeer(!1,e.config);i.answeringPeer=m,i.answerSent=!1,i.connectionErrorReported=!1,Zo(e,i,t,m),ae(i);let d=()=>{i.answeringPeer===m&&!i.connectedPeer&&i.answerSent&&gn(e,i,t),un(i,m),e.disconnectPeer(m,t),e.checkDeactivate()};m.setHandlers({connect:()=>e.connectPeer(m,t,n),close:d,error:d});let c;try{c=await e.toPlain({type:"offer",sdp:o})}catch{un(i,m),e.onJoinError?.({error:"incorrect room password when decrypting offer",appId:e.appId,peerId:t,roomId:e.roomId});return}if(m.isDead){un(i,m);return}let u=await Ae(_e(e.rootTopicPlaintext,t));e.isLeaving()||(m.setHandlers({signal:g=>{e.isLeaving()||i.answeringPeer!==m||m.isDead||g.type!=="answer"&&g.type!=="candidate"||kr(e,g,u,r,y=>{let v={peerId:Y};return g.type==="answer"?(i.answerSent=!0,v.answer=y):v.candidate=y,a&&(v.offerId=a),e.isPassive&&(v.passive=!0),v},()=>i.answeringPeer===m&&!m.isDead)}}),await m.signal(c),await Xo(i,m,a))},ns=async(e,n,t,o,a)=>{var c;let s;try{s=await e.toPlain({type:an,sdp:t})}catch{return}let r=qe(e.peerStates,n),i=o&&r?.offerPeer&&r.offerId===o?r.offerPeer:null,f=r?.answeringPeer??null,m=!o&&r?.offerPeer?r.offerPeer:null,d=a&&!a.isDead?a:i??f??m;if(!d||d.isDead){let u=o??Wn;((c=r.pendingCandidates)[u]??(c[u]=[])).push(s);return}d.signal(s)},ts=async(e,n,t,o,a,s)=>{let r;try{r=await e.toPlain({type:"answer",sdp:o})}catch{e.onJoinError?.({error:"incorrect room password when decrypting answer",appId:e.appId,peerId:t,roomId:e.roomId});return}if(s)e.offerPool.claimLeased(s),s.setHandlers({connect:()=>e.connectPeer(s,t,n),close:()=>e.disconnectPeer(s,t)}),s.signal(r);else{let i=e.peerStates[t];if(!i||!i.offerPeer||i.offerAnswered||a&&i.offerId&&a!==i.offerId||i.offerPeer.isDead)return;i.offerAnswered=!0,vr(e,i,t,Uo),i.offerPeer.signal(r)}},rs=(e,n,t)=>{let o=e.peerStates[n];!o||o.connectedPeer||o.offerRelays[t]&&(Vn(o,t),e.checkDeactivate())},br=e=>n=>async(t,o,a)=>{if(e.isLeaving())return;let s=zo(o);if(!s||Jo(s))return;let r=Qe(s,"peerId")??"",i=Qe(s,"offer"),f=Qe(s,"answer"),m=Qe(s,"candidate"),d=Qe(s,"offerId"),c=s.peer,u=s.hasOutgoingOffer===!0,g=s.passive===!0;if(!r||r===Y)return;let[y,v]=await se([e.rootTopicP,e.selfTopicP]);if(e.isLeaving()||t!==y&&t!==v||e.isPassive&&g||(e.isPassive&&!e.isActive&&!f&&!m&&(e.isActive=!0,e.requeueAnnounce?.()),e.isPassive&&!e.isActive))return;let T=e.peerStates[r],O=T?.connectedPeer;if(O&&T){let L=pr(O);if(L==="live"){T.connectedPeerUnhealthySinceMs=null;return}if(L==="stale")mn(T,r,"message-from-stale-peer");else{let R=Date.now(),E=T.connectedPeerUnhealthySinceMs??R;if(T.connectedPeerUnhealthySinceMs=E,R-E<Ko)return;mn(T,r,"message-from-prolonged-disconnect")}}let w=e.sharedPeers.get(e.appId,r);w&&e.sharedPeers.getHealth(w.peer)==="stale"&&(e.sharedPeers.clear(e.appId,r,{destroyPeer:!0}),w=void 0);let B=!!(r&&!i&&!f&&!m);if(B&&!w){let L=qe(e.peerStates,r),R=Y<r;if(L.answeringPeer||L.connectedPeer||L.offerAnswered)return;if(!R&&!L.offerPeer){let E=await Ae(_e(e.rootTopicPlaintext,r));!e.isLeaving()&&!L.connectedPeer&&a(E,Q({peerId:Y}));return}if(L.offerRelays[n])return;L.offerRelays[n]=dn,ae(L)}if(w&&(i||f||m)){if(w.bindings[e.roomId])return;e.attachSharedPeerToRoom(r,w);return}if(B)return Qo(e,n,r,w,a);if(i)return es(e,n,r,i,d,u,a);if(m)return ns(e,r,m,d,c);if(f)return ts(e,n,r,f,d,c)};var Gn=5333,os=[233,533,1333],ss=7533,as=123333,Zn=({init:e,subscribe:n,announce:t,deactivate:o})=>{let a={},s={},r={},i={},f=new wr,m=()=>we(a).some(R=>te(R).length>0),d=R=>s[R]??(s[R]={}),c=R=>r[R]??(r[R]={}),u=(R,E,j)=>{f.getHealth(R.peer)==="live"&&f.sendRoomPresence(R,E,j)},g=(R,E)=>{de(s[R]??{}).forEach(([j,b])=>{if(!b.shouldAdvertise())return;let{roomToken:q,roomTokenPromise:F}=b;if(q){u(E,q,!0);return}F.then($=>{s[R]?.[j]===b&&b.roomToken===$&&(f.get(R,E.peerId)!==E||E.isClosing||b.shouldAdvertise()&&u(E,$,!0))})})},y=(R,E,j)=>we(f.getMap(R)).forEach(b=>u(b,E,j)),v=R=>{i[R]||(i[R]=f.setRoomPresenceHandler(R,(E,j,b)=>{if(!b)return;let q=f.get(R,E),F=r[R]?.[j];!q||!F||s[R]?.[F]?.attachSharedPeerToRoom(E,q)}))},T=R=>{a[R]&&te(a[R]).length>0||(i[R]?.(),delete i[R],delete s[R],delete r[R])},O=!1,w=[],B=null,L=Z;return(R,E,j)=>{if(!R)throw N("requires a config map as the first argument");if(j&&typeof j!="object")throw N("third argument must be a callbacks object");let{appId:b}=R,q=j?.onJoinError,F=j?.onPeerHandshake,$=j?.handshakeTimeoutMs;if(!b)throw N("config map is missing appId field");if(!E)throw N("roomId argument required");if($!==void 0&&(!Number.isFinite($)||$<=0))throw N("handshakeTimeoutMs must be a positive number");if(a[b]?.[E])return a[b][E];v(b);let W=_e(X,b,E),V=Ae(W),l=Ae(_e(W,Y)),p=qt(R.password??"",b,E),S=zt(b,E),P=R._test_only_sharedPeerIdleMs??as,M=!1,I=C=>async D=>({type:D.type,sdp:await C(p,D.sdp)}),K=I(Vt),h=I(Wt),k=f.getMap(b),x=()=>Kn(!0,R);B||(B=new Gt(x));let z=B,ve=async C=>{let D=await C.getOffer(Date.now()-C.created>Ge);if(!D||D.type!=="offer")throw N("failed to get offer for peer");return(await h(D)).sdp},be=(C,D)=>{let H=qe(G.peerStates,C);H.answeringExpiryTimer=_(H.answeringExpiryTimer),H.answeringPeer=null;let{proxy:ee,isNew:U}=f.bind(E,S,D,{onDetach:()=>{let oe=G.peerStates[C];oe?.connectedPeer===D.peer&&(oe.connectedPeer=null,oe.connectedPeerUnhealthySinceMs=null,ae(oe))}});H.connectedPeer=D.peer,H.connectedPeerUnhealthySinceMs=null,ae(H),U&&wn(ee,C),ze(H,z)},Lr=(C,D,H)=>{if(M){C.destroy();return}let ee=qe(G.peerStates,D);if(ee.connectedPeer){let Ce=k[D];if(Ce&&ee.connectedPeer===Ce.peer&&Ce.bindings[E])return;ee.connectedPeer!==C&&!C.isDead&&C.destroy();return}let U=k[D];if(U&&f.getHealth(U.peer)==="stale"&&(f.clear(b,D,{destroyPeer:!0}),U=void 0),U&&U.peer!==C){C.isDead||C.destroy(),be(D,U);return}let oe=!U;U||(U=f.register(b,D,C,P)),be(D,U),oe&&g(b,U)},Hr=(C,D)=>{if(M)return;let H=G.peerStates[D];H?.connectedPeer===C&&(mn(H,D,"close-event"),en())},ie=!!R.passive,Be=null,Oe,tt=Z,en=()=>{if(!ie||!G.isActive)return;let C=!1;de(G.peerStates).forEach(([D,H])=>{H.connectedPeer||H.answeringPeer||H.offerInitPromise||H.offerPeer||H.offerRelays.some(Boolean)?C=!0:H.status==="idle"&&delete G.peerStates[D]}),C||(G.isActive=!1,Oe=_(Oe),Ue.forEach(_),Ue.length=0,tt(),Be?.roomToken&&y(b,Be.roomToken,!1))},G={appId:b,roomId:E,config:R,peerStates:{},rootTopicPlaintext:W,rootTopicP:V,selfTopicP:l,toPlain:K,toCipher:h,isLeaving:()=>M,isPassive:ie,isActive:!ie,onJoinError:q,sharedPeers:f,offerPool:z,encryptOffer:ve,initPeer:Kn,connectPeer:Lr,disconnectPeer:Hr,attachSharedPeerToRoom:be,checkDeactivate:en,announceIntervals:[],announceIntervalMs:Gn},hn={config:R,appId:b,roomId:E,isPassive:ie},xr=br(G);if(!O){let C=e(R);w=(Array.isArray(C)?C:[C]).map(D=>Promise.resolve(D)),O=!0,L=R.relayConfig?.manualReconnection?Z:$t()}!ie&&!z.isActive&&z.warmup(),G.announceIntervals=w.map(()=>Gn);let yn=w.map(()=>0),pn=w.map(()=>0),Ue=[],rt=w.map(async(C,D)=>n(await C,await V,await l,xr(D),H=>z.getOffers(H,ve),hn));se([V,l]).then(([C,D])=>{if(M)return;let H=async(ee,U)=>{if(M||ie&&!G.isActive)return;let oe=ie?{passive:!0}:void 0,Ce;try{Ce=await t(ee,C,D,oe,hn),pn[U]=0}catch(jr){let ct=pn[U]??0;ct===0&&console.warn(`${X}: announce failed - ${Pe(jr,"")}`),pn[U]=ct+1}if(M||ie&&!G.isActive)return;typeof Ce=="number"&&(G.announceIntervals[U]=Ce);let st=yn[U]??0;yn[U]=st+1;let at=G.announceIntervals[U]??Gn,it=os[st];Ue[U]=setTimeout(()=>{H(ee,U)},typeof it=="number"?Math.min(at,it):at)};tt=()=>{o&&w.forEach(async ee=>{let U=await ee;M||o(U,C,D,hn)})},G.requeueAnnounce=()=>{Ue.forEach(_),Ue.length=0,Oe=_(Oe),z.isActive||z.warmup(),Be?.roomToken&&y(b,Be.roomToken,!0),Oe=setTimeout(en,ss),w.forEach(async(ee,U)=>{let oe=await ee;oe&&!M&&(yn[U]=0,H(oe,U))})},rt.forEach(async(ee,U)=>{if(await ee,M)return;let oe=await w[U];oe&&!M&&(!ie||G.isActive)&&H(oe,U)})});let wn=Z,{compose:_r}=Zt(R.password??"",b,E),ot=_r(F),Nr={...ot?{onPeerHandshake:ot}:{},...$===void 0?{}:{handshakeTimeoutMs:$},isPassive:ie,onHandshakeError:(C,D)=>q?.({error:D.replace(/^handshake failed: /,""),appId:b,peerId:C,roomId:E})};a[b]??(a[b]={});let Ir=d(b),Ur=dr(C=>wn=C,C=>{if(M)return;let D=G.peerStates[C];D?.connectedPeer&&(D.connectedPeer=null,ae(D),en())},()=>{M=!0,wn=Z;let C=s[b]?.[E];C?.roomToken&&(y(b,C.roomToken,!1),delete r[b]?.[C.roomToken],r[b]&&!te(r[b]).length&&delete r[b]),s[b]&&(delete s[b][E],te(s[b]).length||delete s[b]),de(G.peerStates).forEach(([D,H])=>{if(H.answeringExpiryTimer=_(H.answeringExpiryTimer),H.connectedPeer&&!H.connectedPeer.isDead){let ee=k[D];(!ee||ee.peer!==H.connectedPeer)&&H.connectedPeer.destroy()}H.answeringPeer&&!H.answeringPeer.isDead&&H.answeringPeer.destroy(),ze(H,z),H.connectedPeer=null,H.answeringPeer=null,ae(H)}),a[b]&&(delete a[b][E],te(a[b]).length===0&&delete a[b]),Ue.forEach(_),Oe=_(Oe),rt.forEach(async D=>{(await D)()}),!m()&&(O=!1,z.destroy(),B=null,L(),T(b))},Nr);return Be={roomToken:null,roomTokenPromise:S,attachSharedPeerToRoom:be,shouldAdvertise:()=>!ie||G.isActive},Ir[E]=Be,S.then(C=>{let D=Be;!D||M||s[b]?.[E]!==D||(D.roomToken=C,c(b)[C]=E,we(k).forEach(H=>{H.remoteRoomTokens.has(C)&&be(H.peerId,H)}),(!ie||G.isActive)&&y(b,C,!0))}),a[b][E]=Ur}};var is=["offer","answer","candidate"],cs=e=>{if(typeof e=="string")try{let n=ye(e);return n&&typeof n=="object"?n:null}catch{return null}return e},Xn=(e,n)=>typeof e[n]=="string"&&e[n]?e[n]:void 0,fs=e=>is.some(n=>n in e&&(typeof e[n]!="string"||e[n]==="")),ls=e=>{let n=cs(e);if(!n||fs(n))return!1;let t=Xn(n,"peerId");return!!(t&&t!==Y&&n.passive!==!0&&!Xn(n,"answer")&&!Xn(n,"candidate"))},Yn=e=>{if(!e)throw N("topic strategy missing room context");return e},Sr=(e,n,t,o)=>({kind:n,appId:e.appId,roomId:e.roomId,rootTopic:t,selfTopic:o}),Qn=(e,n,t,o)=>({kind:n,appId:e.appId,roomId:e.roomId,rootTopic:t,selfTopic:o}),et=({init:e,subscribeTopic:n,publishTopic:t,unpublishTopic:o})=>Zn({init:e,subscribe:async(a,s,r,i,f,m)=>{let d=Yn(m),c=(B,L)=>t(a,B,L,Qn(d,"signal",s,r)),u=null,g=!1,y=null,v=!1,T=B=>{g||(g=!0,B())},O=()=>(y||(y=Promise.resolve(n(a,r,(B,L)=>{v||i(B,L,c)},Sr(d,"self",s,r))).then(B=>{u=B,v&&T(B)})),y);d.isPassive||await O();let w=await n(a,s,async(B,L)=>{v||(d.isPassive&&ls(L)&&await O(),v||await i(B,L,c))},Sr(d,"root",s,r));return()=>{v=!0,u&&T(u),w()}},announce:(a,s,r,i,f)=>{let m=Yn(f);return t(a,s,Q({peerId:Y,...i}),Qn(m,"announce",s,r))},...o?{deactivate:(a,s,r,i)=>o(a,s,Qn(Yn(i),"announce",s,r))}:{}});var Rr=Nn(e=>e.socket),us=5,Ar="x",Er="EVENT",{secretKey:ds,publicKey:ms}=Mn.keygen(),gs=ke(ms),hs={},ys={},nt={},Tr=250,Mr=()=>Math.floor(Date.now()/1e3),Br=e=>nt[e]??(nt[e]=cn(e,1e4)+2e4),ps=async(e,n)=>{let t={kind:Br(e),tags:[[Ar,e]],created_at:Mr(),content:n,pubkey:gs},o=await Ne("SHA-256",Q([0,t.pubkey,t.created_at,t.kind,t.tags,t.content]));return Q([Er,{...t,id:ke(o),sig:ke(await Mn.signAsync(o,ds))}])};var Me={},ws=(e,n,t)=>{var a;let o=Me[a=e.url]??(Me[a]={subIds:[],topics:new Map,updateTimer:null});o.topics.set(n,t),Or(e,o)},Ps=(e,n)=>{let t=Me[e.url];t&&(t.topics.delete(n),t.topics.size===0?(t.updateTimer!==null&&(clearTimeout(t.updateTimer),t.updateTimer=null),t.subIds.forEach(o=>e.send(Q(["CLOSE",o]))),delete Me[e.url]):Or(e,t))},Or=(e,n)=>{n.updateTimer===null&&(n.updateTimer=setTimeout(()=>{n.updateTimer=null,Cr(e)},0))},Cr=e=>{let n=Me[e.url];if(!n||n.topics.size===0)return;let t=[...n.topics.keys()],o=[],a=Mr();for(let s=0;s<t.length;s+=Tr)o.push(t.slice(s,s+Tr));for(;n.subIds.length>o.length;){let s=n.subIds.pop();s&&e.send(Q(["CLOSE",s]))}o.forEach((s,r)=>{var f;let i=(f=n.subIds)[r]??(f[r]=fe(64));e.send(Q(["REQ",i,{kinds:[...new Set(s.map(Br))],since:a,"#x":s}]))})},ks=e=>{let n=Me[e.url];n&&n.topics.size>0&&Cr(e)},vs=et({init:e=>Ln(e,Dr,us,!0).map(n=>{let t=Rr.register(n,_n(n,o=>{let[a,s,r,i]=ye(o);if(a!==Er){let f=`${X}: relay failure from ${t.url} - `;a==="NOTICE"?console.warn(f+s):a==="OK"&&!r&&console.warn(f+i);return}if(r&&typeof r=="object"&&"content"in r){let{content:f}=r,m=ys[s];if(m){m(hs[s]??"",f);return}let d=Me[t.url];if(d?.subIds.includes(s)&&r.tags){let c=r.tags.find(u=>u[0]===Ar);c?.[1]&&d.topics.get(c[1])?.(c[1],f)}}},()=>ks(t)));return t.ready}),subscribeTopic:(e,n,t)=>(ws(e,n,(a,s)=>{t(a,s)}),()=>{Ps(e,n)}),publishTopic:async(e,n,t)=>e.send(await ps(n,typeof t=="string"?t:Q(t)))}),bs=Rr.getSockets,Dr=["basspistol.org","bucket.coracle.social","chorus.almostmachines.dev","chorus.pjv.me","communities.nos.social","ftp.halifax.rwth-aachen.de/nostr","hol.is","hornetstorage.net/relay","koru.bitcointxoko.org","nos.lol","nostr-01.uid.ovh","nostr-01.yakihonne.com","nostr-relay.corb.net","nostr.data.haus","nostr.islandarea.net","nostr.sathoarder.com","nostr.self-determined.de","nostr.tegila.com.br","nostr.vulpem.com","purplerelay.com","relay-can.zombi.cloudrodion.com","relay-rpi.edufeed.org","relay.agorist.space","relay.angor.io","relay.artio.inf.unibe.ch","relay.binaryrobot.com","relay.damus.io","relay.froth.zone","relay.libernet.app","relay.mostr.pub","relay.mostro.network","relay.nostr.place","relay.nostrdice.com","relay.notoshi.win","relay.sigit.io","relay02.lnfi.network","relay2.angor.io","schnorr.me","slick.mjex.me","social.amanah.eblessing.co","staging.yabu.me","strfry.openhoofd.nl","strfry.shock.network","testnet-relay.samt.st","top.testrelay.top","x.kojira.io","yabu.me/v2"].map(e=>"wss://"+e);globalThis.__T={defaultRelayUrls:Dr,getRelaySockets:bs,joinRoom:vs,selfId:Y};
@@ -372,22 +440,28 @@ var Kr=Object.defineProperty;var $r=(e,n,t)=>n in e?Kr(e,n,{enumerable:!0,config
   <script type="module">
 // Global Free Speech — serverless, ephemeral, peer-to-peer chat.
 //
-// No backend: browsers find each other via free public Nostr relays (Trystero,
-// vendored) for the encrypted WebRTC handshake only; messages then flow directly
-// browser-to-browser over end-to-end-encrypted data channels and are never stored.
-//
-// Live history hand-off: when you join, peers already in the room send you the
-// recent conversation from their own memory. If everyone leaves, history is gone.
+// No backend: peers find each other via free public Nostr relays (Trystero,
+// vendored) for the encrypted WebRTC handshake only; chat flows directly
+// browser-to-browser over end-to-end-encrypted data channels and is never stored.
+// Live history hand-off lets newcomers catch up from whoever is currently present.
 
 const {joinRoom, selfId, getRelaySockets} = globalThis.__T;
 
-// Any deep URL (e.g. someone typing /README.md or /app.js) is served this same
-// app; silently clean the address bar back to root WITHOUT reloading, so no file
-// and no error are ever shown — the visitor just lands in the chat.
+/* ------------------------------------------------------------------ *
+ * Room code from URL (#r=<code>) + address-bar normalization
+ * ------------------------------------------------------------------ */
+function parseRoomCode() {
+  const m = location.hash.match(/[#&]r=([^&]+)/)
+  let c = ''
+  if (m) { try { c = decodeURIComponent(m[1]) } catch { c = m[1] } }
+  return c.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32)
+}
+const ROOM_CODE = parseRoomCode()
+// Any deep URL or junk is collapsed; a valid #r=code is preserved. replaceState =
+// no reload, so a typed "/README.md" silently lands on the app with a clean bar.
 try {
-  if (location.pathname !== '/' || location.search || location.hash) {
-    history.replaceState(null, '', '/')
-  }
+  const want = ROOM_CODE ? '/#r=' + ROOM_CODE : '/'
+  if (location.pathname + location.search + location.hash !== want) history.replaceState(null, '', want)
 } catch {}
 
 /* ------------------------------------------------------------------ *
@@ -395,99 +469,178 @@ try {
  * ------------------------------------------------------------------ */
 const CONFIG = {
   appId: 'chat-to-chat-p2p-v1',
-  // One room per host. Every path is served the app and normalized to '/', so
-  // everyone on the domain shares the same single room regardless of URL.
-  roomId: location.hostname || 'localhost',
-  turnConfig: [
-    // {urls: 'turn:your-turn-host:3478', username: 'user', credential: 'pass'},
+  // Default public room = the host. A share code switches to a private/topical room.
+  roomId: ROOM_CODE ? 'code:' + ROOM_CODE : (location.hostname || 'localhost'),
+  isDefaultRoom: !ROOM_CODE,
+  roomCode: ROOM_CODE,
+  // Curated high-uptime public Nostr relays (free, not owner-run). Pinning these
+  // (vs Trystero's churny ~46-relay default) makes peer discovery deterministic.
+  relayUrls: [
+    'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band',
+    'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.snort.social',
+    'wss://nostr.wine', 'wss://relay.nostr.bg',
   ],
+  relayRedundancy: 8,
+  turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
   maxNameLen: 24,
   maxMsgLen: 4000,
-  maxRendered: 400,    // cap timeline entries kept in memory/DOM
-  historyShare: 30,    // recent messages handed to a newcomer
-  floodWindowMs: 2000, // per-peer flood window
-  floodMax: 20,        // max messages per peer per window before dropping
+  maxRendered: 400,
+  historyShare: 30,
+  meshCap: 12,
+  idleMs: 60000,
+  gapDividerMs: 5 * 60 * 1000,
+  // per-channel inbound flood budgets (count within window ms)
+  flood: { msg: [20, 2000], name: [6, 4000], typing: [40, 2000], react: [40, 2000], presence: [20, 4000] },
 }
 
 /* ------------------------------------------------------------------ *
  * DOM
  * ------------------------------------------------------------------ */
 const $ = s => document.querySelector(s)
-const gate = $('#gate'), gateForm = $('#gate-form'), nickInput = $('#nick')
-const app = $('#app'), messagesEl = $('#messages'), typingEl = $('#typing'), jumpBtn = $('#jump')
-const inputEl = $('#input'), sendBtn = $('#send'), emojiBtn = $('#emoji-btn'), emojiPanel = $('#emoji')
-const statusDot = $('#status-dot'), statusText = $('#status-text')
+const gate = $('#gate'), gateForm = $('#gate-form'), nickInput = $('#nick'), surpriseBtn = $('#surprise')
+const gateAvatar = $('#gate-avatar'), gatePass = $('#gate-pass'), gatePassWrap = $('#gate-pass-wrap'), gateRoomLabel = $('#gate-room')
+const app = $('#app'), messagesEl = $('#messages'), typingEl = $('#typing'), jumpBtn = $('#jump'), bannerEl = $('#banner')
+const inputEl = $('#input'), sendBtn = $('#send'), emojiBtn = $('#emoji-btn'), emojiPanel = $('#emoji'), emojiSearch = $('#emoji-search'), emojiGrid = $('#emoji-grid')
+const replyBar = $('#reply-bar'), replyText = $('#reply-text'), replyCancel = $('#reply-cancel')
+const statusBtn = $('#status'), statusDot = $('#status-dot'), statusText = $('#status-text'), statusPanel = $('#status-panel')
 const onlineCountEl = $('#online-count'), peopleEl = $('#people'), peopleListEl = $('#people-list'), peopleCountEl = $('#people-count')
 const rulesEl = $('#rules')
 const peopleToggle = $('#people-toggle'), peopleClose = $('#people-close')
 const rulesToggle = $('#rules-toggle'), rulesClose = $('#rules-close')
-const scrim = $('#scrim')
-const meName = $('#me-name'), meDot = $('#me-dot')
+const scrim = $('#scrim'), meName = $('#me-name'), meDot = $('#me-dot')
+const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
+const shareBtn = $('#share-btn'), sharePanel = $('#share'), shareCodeEl = $('#share-code'), shareLinkBtn = $('#share-copy-link'), shareCodeBtn = $('#share-copy-code'), shareNewBtn = $('#share-new')
+const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
+const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 
 /* ------------------------------------------------------------------ *
  * State
  * ------------------------------------------------------------------ */
 let myName = ''
-let room = null
-let actions = null                 // {msg, name, typing, hist}
-const peers = new Map()            // peerId -> {name|null}
-const typingTimers = new Map()     // peerId -> timeout id
-const floodState = new Map()       // peerId -> {count, start}
-const timeline = []                // sorted by (t,id); entries {kind:'msg'|'sys', id, t, ...}
+let myPass = ''
+let room = null, actions = null
+const peers = new Map()            // peerId -> {name|null, presence:'active'|'idle'}
+const typingTimers = new Map()
+const floodState = new Map()       // `${peerId}:${channel}` -> {count, start}
+const histAcceptedFrom = new Set() // peers we already took a history burst from
+const muted = new Set()            // peerIds muted this session (ephemeral)
+const reactions = new Map()        // msgKey -> Map(emoji -> Set(peerId))
+const timeline = []                // sorted by (t, id); {kind:'msg'|'sys', id, t, ...}
 const seenIds = new Set()
-let seq = 0                        // local monotonic counter (unique ids + tiebreak)
-let newestId = null                // last entry to receive the entrance animation
-let typingSentAt = 0, iTyping = false, typingStopTimer = null
+let seq = 0
+let iTyping = false, typingSentAt = 0, typingStopTimer = null
+let myPresence = 'active', idleTimer = null
+let unread = 0
+let replyTo = null                 // {key, name, snippet}
+let pendingSys = []                // batched join/leave/rename lines
+let pendingSysTimer = null
 
 /* ------------------------------------------------------------------ *
  * Helpers
  * ------------------------------------------------------------------ */
-const clampStr = (v, m) => (typeof v === 'string' ? v.slice(0, m) : '')
+// Strip bidi-override, zero-width and control chars (anti-spoofing; render is
+// already textContent so this is not about XSS), then clamp by visible length.
+// U+200D (ZWJ) is intentionally NOT stripped - it glues emoji sequences
+// (family/profession/flag emoji). Strip ZWSP/ZWNJ, controls, bidi & BOM.
+const BAD_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B\u200C\u202A-\u202E\u2066-\u2069\uFEFF]/g
+function sanitize(v, max) {
+  if (typeof v !== 'string') return ''
+  let s = v.replace(BAD_CHARS, '')
+  // collapse runs of >2 newlines so a peer can't blow up the layout
+  s = s.replace(/\n{3,}/g, '\n\n')
+  return max ? s.slice(0, max) : s
+}
+const clampStr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '')
 const shortId = id => 'guest-' + String(id || '').slice(0, 4)
+const fp = id => String(id || '').slice(0, 4)
+
+const colorCache = new Map()
 function colorOf(id) {
+  let c = colorCache.get(id)
+  if (c) return c
   let h = 0
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
-  return `hsl(${h % 360} 72% 68%)`
+  c = `hsl(${h % 360} 72% 62%)`
+  if (colorCache.size > 2000) colorCache.clear()   // bound the cache on marathon sessions
+  colorCache.set(id, c)
+  return c
 }
 const initialOf = name => ((name || '?').trim()[0] || '?').toUpperCase()
-function fmtTime(t) {
-  const d = new Date(typeof t === 'number' && isFinite(t) ? t : Date.now())
-  return d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
+const validT = t => (typeof t === 'number' && isFinite(t)) ? Math.min(Math.max(t, 0), Date.now() + 60000) : Date.now()
+function fmtTime(t) { return new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) }
+function relTime(t) {
+  const s = Math.floor((Date.now() - t) / 1000)
+  if (s < 45) return 'just now'
+  if (s < 90) return '1 min ago'
+  if (s < 3600) return Math.round(s / 60) + ' min ago'
+  if (s < 7200) return '1 hr ago'
+  if (s < 86400) return Math.round(s / 3600) + ' hr ago'
+  return fmtTime(t)
 }
 const nameOf = peerId => { const p = peers.get(peerId); return (p && p.name) || shortId(peerId) }
-const newMsgId = () => `${selfId}-${Date.now()}-${seq++}`
+const keyOf = (author, rawId) => author + '::' + rawId
+const newRawId = () => Date.now().toString(36) + '-' + (seq++).toString(36)
 const isNearBottom = () => messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 120
+const isMuted = peerId => muted.has(peerId)
+
+// names are unauthenticated → flag when two VISIBLE peers share one
+function nameIsDuplicated(peerId, name) {
+  if (!name) return false
+  let n = 0
+  if (myName === name) n++
+  for (const [id, p] of peers) { if (!isMuted(id) && p.name === name) n++ }
+  return n > 1
+}
 
 /* ------------------------------------------------------------------ *
- * Timeline (single source of truth for what's rendered)
+ * Timeline (single source of truth)
  * ------------------------------------------------------------------ */
 const cmp = (a, b) => a.t - b.t || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-
 function addEntry(entry) {
-  if (entry.id && seenIds.has(entry.id)) return false
+  if (entry.id && seenIds.has(entry.id)) return null
   if (entry.id) seenIds.add(entry.id)
   let i = timeline.length
   while (i > 0 && cmp(timeline[i - 1], entry) > 0) i--
   timeline.splice(i, 0, entry)
+  const atEnd = i === timeline.length - 1
+  let evicted = false
   while (timeline.length > CONFIG.maxRendered) {
     const r = timeline.shift()
-    if (r.id) seenIds.delete(r.id)
+    evicted = true
+    if (r.kind === 'msg') reactions.delete(r.id)
+    // Do NOT delete r.id from seenIds — keeping dedup stable stops an evicted
+    // message being re-inserted as a duplicate by a late history burst.
   }
-  return true
+  // soft-cap the dedup set so a marathon session can't grow it unbounded
+  if (seenIds.size > 4000) { const it = seenIds.values(); for (let k = 0; k < 1000; k++) seenIds.delete(it.next().value) }
+  return {atEnd, evicted}
+}
+
+function visibleEntries() {
+  return timeline.filter(e => e.kind !== 'msg' || !isMuted(e.peerId))
 }
 
 function renderTimeline({stick} = {}) {
   const atBottom = stick ?? isNearBottom()
   const prevTop = messagesEl.scrollTop
   const frag = document.createDocumentFragment()
-  let last = null
-  for (const e of timeline) {
-    if (e.kind === 'sys') { frag.appendChild(sysNode(e.text)); last = null }
-    else { frag.appendChild(msgNode(e, last === e.peerId)); last = e.peerId }
+  let last = null, lastT = 0
+  for (const e of visibleEntries()) {
+    if (e.kind === 'sys') { frag.appendChild(sysNode(e.text)); last = null; lastT = e.t; continue }
+    if (lastT && e.t - lastT > CONFIG.gapDividerMs) { frag.appendChild(sysNode(timeLabel(e.t))); last = null }
+    frag.appendChild(msgNode(e, last === e.peerId && !e.emote))
+    last = e.emote ? null : e.peerId; lastT = e.t
   }
   messagesEl.replaceChildren(frag)
   messagesEl.scrollTop = atBottom ? messagesEl.scrollHeight : prevTop
   if (atBottom) hideJump()
+  refreshEmpty()
+}
+
+function timeLabel(t) {
+  const d = new Date(t), now = new Date()
+  const same = d.toDateString() === now.toDateString()
+  return same ? fmtTime(t) : d.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' · ' + fmtTime(t)
 }
 
 function sysNode(text) {
@@ -498,53 +651,279 @@ function sysNode(text) {
 }
 
 function msgNode(e, grouped) {
+  if (e.emote) {   // /me action line
+    const el = document.createElement('div')
+    el.className = 'sys emote'; el.dataset.key = e.id
+    el.textContent = '✦ ' + (e.peerId === selfId ? 'You' : e.name) + ' ' + e.text
+    return el
+  }
   const self = e.peerId === selfId
   const row = document.createElement('div')
-  row.className = 'msg' + (self ? ' me' : '') + (grouped ? ' cont' : '') + (e.id === newestId ? ' msg--new' : '')
+  row.className = 'msg' + (self ? ' me' : '') + (grouped ? ' cont' : '')
+  row.dataset.key = e.id
 
   const avatar = document.createElement('div')
   avatar.className = 'avatar'
   avatar.style.background = colorOf(e.peerId)
   avatar.textContent = initialOf(e.name)
+  row.appendChild(avatar)
 
   const stack = document.createElement('div')
   stack.className = 'stack'
+
   const meta = document.createElement('div')
   meta.className = 'meta'
   const who = document.createElement('span')
   who.className = 'who'
   who.style.color = self ? '' : colorOf(e.peerId)
   who.textContent = self ? 'You' : e.name
+  meta.appendChild(who)
+  if (!self && nameIsDuplicated(e.peerId, e.name)) meta.appendChild(badge(e.peerId))
   const time = document.createElement('span')
   time.className = 'time'
   time.textContent = fmtTime(e.t)
-  meta.append(who, time)
+  time.title = relTime(e.t)
+  meta.appendChild(time)
+  stack.appendChild(meta)
+
+  if (e.reply) stack.appendChild(replyQuote(e.reply))
+
   const bubble = document.createElement('div')
   bubble.className = 'bubble'
-  bubble.textContent = e.text   // textContent => no HTML injection, ever
-  stack.append(meta, bubble)
-  row.append(avatar, stack)
+  renderRichText(bubble, e.text)
+  stack.appendChild(bubble)
+
+  const rbar = reactionBar(e.id)
+  if (rbar) stack.appendChild(rbar)
+
+  // hover/long-press toolbar (react + reply)
+  stack.appendChild(msgTools(e))
+
+  row.appendChild(stack)
   return row
 }
 
+function badge(peerId) {
+  const b = document.createElement('span')
+  b.className = 'fp'
+  b.textContent = '#' + fp(peerId)
+  b.title = 'Names aren’t verified — this id distinguishes same-named people'
+  return b
+}
+
+function replyQuote(reply) {
+  const q = document.createElement('button')
+  q.type = 'button'; q.className = 'replyquote'
+  if (reply.unresolved) {
+    const tx = document.createElement('span'); tx.className = 'rq-text'; tx.textContent = '↩ replying to an earlier message'
+    q.appendChild(tx)
+  } else {
+    const who = document.createElement('span'); who.className = 'rq-who'; who.textContent = reply.name || 'unknown'
+    const tx = document.createElement('span'); tx.className = 'rq-text'; tx.textContent = reply.snippet || ''
+    q.append(who, tx)
+  }
+  q.addEventListener('click', () => scrollToKey(reply.key))
+  return q
+}
+
+function scrollToKey(key) {
+  const el = messagesEl.querySelector(`.msg[data-key="${cssEsc(key)}"]`)
+  if (el) { el.scrollIntoView({block: 'center', behavior: 'smooth'}); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200) }
+}
+const cssEsc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&')
+
+/* ----- rich text: linkify + minimal markdown, DOM nodes only (no innerHTML) ---- */
+const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,;:!?)\]}'"])/g
+function renderRichText(el, text) {
+  // split into URL / non-URL segments; format inline markdown in non-URL parts
+  let last = 0, m
+  URL_RE.lastIndex = 0
+  while ((m = URL_RE.exec(text))) {
+    if (m.index > last) appendInline(el, text.slice(last, m.index))
+    el.appendChild(linkNode(m[0]))
+    last = m.index + m[0].length
+  }
+  if (last < text.length) appendInline(el, text.slice(last))
+}
+function linkNode(url) {
+  const a = document.createElement('a')
+  a.className = 'link'
+  // scheme is guaranteed http(s) by the regex; set via property (no HTML parsing)
+  a.href = url
+  a.textContent = url
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer nofollow'
+  return a
+}
+const INLINE_RE = /(\*\*([^*]+)\*\*|`([^`]+)`|_([^_]+)_)/g
+function appendInline(el, text) {
+  let last = 0, m
+  INLINE_RE.lastIndex = 0
+  while ((m = INLINE_RE.exec(text))) {
+    if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)))
+    let tag = 'span'
+    if (m[2] != null) tag = 'strong'
+    else if (m[3] != null) tag = 'code'
+    else if (m[4] != null) tag = 'em'
+    const node = document.createElement(tag)
+    node.textContent = m[2] ?? m[3] ?? m[4]
+    el.appendChild(node)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)))
+}
+
+/* ----- reactions ---- */
+function reactionBar(key) {
+  const map = reactions.get(key)
+  if (!map || !map.size) return null
+  const bar = document.createElement('div')
+  bar.className = 'reacts'
+  for (const [emoji, set] of map) {
+    if (!set.size) continue
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'react' + (set.has(selfId) ? ' mine' : '')
+    chip.textContent = emoji + ' ' + set.size
+    chip.title = 'React'
+    chip.addEventListener('click', () => toggleReaction(key, emoji))
+    bar.appendChild(chip)
+  }
+  return bar.children.length ? bar : null
+}
+function updateReactionBar(key) {
+  const row = messagesEl.querySelector(`.msg[data-key="${cssEsc(key)}"] .stack`)
+  if (!row) return
+  const existing = row.querySelector(':scope > .reacts')
+  const fresh = reactionBar(key)
+  if (existing && fresh) existing.replaceWith(fresh)
+  else if (existing && !fresh) existing.remove()
+  else if (fresh) {
+    const tools = row.querySelector(':scope > .msgtools')
+    row.insertBefore(fresh, tools || null)
+  }
+}
+function applyReaction(key, emoji, peerId, on) {
+  if (!emoji) return
+  let map = reactions.get(key)
+  if (!map) { map = new Map(); reactions.set(key, map) }
+  let set = map.get(emoji)
+  if (!set) { set = new Set(); map.set(emoji, set) }
+  if (on) set.add(peerId); else set.delete(peerId)
+  if (!set.size) map.delete(emoji)
+  updateReactionBar(key)
+}
+function toggleReaction(key, emoji) {
+  const map = reactions.get(key)
+  const on = !(map && map.get(emoji) && map.get(emoji).has(selfId))
+  applyReaction(key, emoji, selfId, on)
+  if (actions) actions.react.send({target: key, emoji, on})
+}
+
+const QUICK_REACTS = ['👍', '❤️', '😂', '🎉', '🔥', '👀']
+function msgTools(e) {
+  const t = document.createElement('div')
+  t.className = 'msgtools'
+  const react = document.createElement('button')
+  react.type = 'button'; react.className = 'mt'; react.textContent = '😀'; react.title = 'React'
+  react.setAttribute('aria-label', 'React to message')
+  react.addEventListener('click', ev => { ev.stopPropagation(); openReactMenu(react, e.id) })
+  const reply = document.createElement('button')
+  reply.type = 'button'; reply.className = 'mt'; reply.textContent = '↩'; reply.title = 'Reply'
+  reply.setAttribute('aria-label', 'Reply to message')
+  reply.addEventListener('click', ev => { ev.stopPropagation(); startReply(e) })
+  t.append(react, reply)
+  return t
+}
+let reactMenu = null
+function openReactMenu(anchor, key) {
+  closeReactMenu()
+  reactMenu = document.createElement('div')
+  reactMenu.className = 'reactmenu'
+  QUICK_REACTS.forEach(em => {
+    const b = document.createElement('button')
+    b.type = 'button'; b.textContent = em
+    b.addEventListener('click', () => { toggleReaction(key, em); closeReactMenu() })
+    reactMenu.appendChild(b)
+  })
+  anchor.appendChild(reactMenu)
+  setTimeout(() => document.addEventListener('click', closeReactMenu, {once: true}), 0)
+}
+function closeReactMenu() { if (reactMenu) { reactMenu.remove(); reactMenu = null } }
+
+/* ----- replies ---- */
+function startReply(e) {
+  replyTo = {key: e.id, name: e.peerId === selfId ? 'yourself' : e.name, snippet: e.text.slice(0, 120)}
+  replyText.textContent = (replyTo.name) + ': ' + replyTo.snippet
+  replyBar.hidden = false
+  inputEl.focus()
+}
+function cancelReply() { replyTo = null; replyBar.hidden = true }
+
+/* ----- empty state (overlay element, toggled — never overlaps system lines) ---- */
+function refreshEmpty() {
+  const has = timeline.some(e => e.kind === 'msg')
+  emptyEl.hidden = has
+  if (has) return
+  emptyH.textContent = peers.size ? 'No messages yet' : 'You’re the first one here'
+  emptyP.textContent = peers.size
+    ? 'Say hi 👋 — messages are live, peer-to-peer, and never stored.'
+    : 'Share the link and whoever opens it can talk — live, peer-to-peer, nothing stored.'
+}
+
+/* ------------------------------------------------------------------ *
+ * Adding entries
+ * ------------------------------------------------------------------ */
 function addSystem(text) {
   const stick = isNearBottom()
   addEntry({kind: 'sys', id: 'sys-' + seq++, t: Date.now(), text})
   renderTimeline({stick})
 }
 
+// batched join/leave/rename lines (rostercap)
+function addPresenceSys(text) {
+  pendingSys.push(text)
+  clearTimeout(pendingSysTimer)
+  pendingSysTimer = setTimeout(flushPresenceSys, 900)
+}
+function flushPresenceSys() {
+  pendingSysTimer = null
+  if (!pendingSys.length) return
+  const lines = pendingSys; pendingSys = []
+  addSystem(lines.length <= 2 ? lines.join(' · ') : `${lines.slice(0, 2).join(' · ')} · +${lines.length - 2} more`)
+}
+
 function addMessage(entry, fromSelf) {
   const stick = fromSelf || isNearBottom()
-  const added = addEntry({kind: 'msg', ...entry})
-  if (!added) return false
-  newestId = entry.id
-  renderTimeline({stick})
-  if (!stick) showJump()
+  const res = addEntry({kind: 'msg', ...entry})
+  if (!res) return false
+  // fast path only when the entry lands at the end AND nothing was evicted (so the
+  // DOM stays in lockstep with the timeline); otherwise do a full, correct render.
+  const fast = res.atEnd && !res.evicted && !isMuted(entry.peerId) && messagesEl.firstElementChild && emptyEl.hidden
+  if (fast) appendOne(entry, stick); else renderTimeline({stick})
+  if (!fromSelf && !isMuted(entry.peerId)) {
+    announceMsg(`${entry.name}: ${entry.text}`)
+    if (document.hidden) setUnread(unread + 1)
+  }
+  if (!stick && !fromSelf) showJump()
   return true
 }
 
+function appendOne(entry, stick) {
+  // grouping + gap divider derived from the timeline (not the DOM), so it stays correct
+  const vis = visibleEntries()
+  const idx = vis.findIndex(e => e.id === entry.id)
+  const prev = idx > 0 ? vis[idx - 1] : null
+  if (prev && prev.kind === 'msg' && entry.t - prev.t > CONFIG.gapDividerMs) messagesEl.appendChild(sysNode(timeLabel(entry.t)))
+  const grouped = !!prev && prev.kind === 'msg' && !prev.emote && !entry.emote && prev.peerId === entry.peerId && entry.t - prev.t <= CONFIG.gapDividerMs
+  const node = msgNode(entry, grouped)
+  node.classList.add('msg--new')
+  messagesEl.appendChild(node)
+  if (stick) messagesEl.scrollTop = messagesEl.scrollHeight
+}
+
 /* ------------------------------------------------------------------ *
- * Scroll-to-latest affordance
+ * Scroll-to-latest
  * ------------------------------------------------------------------ */
 function showJump() { jumpBtn.hidden = false }
 function hideJump() { jumpBtn.hidden = true }
@@ -556,22 +935,30 @@ messagesEl.addEventListener('scroll', () => { if (isNearBottom()) hideJump() })
  * ------------------------------------------------------------------ */
 function startChat() {
   try {
-    const joinCfg = {appId: CONFIG.appId}
-    if (CONFIG.turnConfig && CONFIG.turnConfig.length) joinCfg.turnConfig = CONFIG.turnConfig
-    room = joinRoom(joinCfg, CONFIG.roomId)
+    const cfg = {appId: CONFIG.appId, relayConfig: {urls: CONFIG.relayUrls, redundancy: CONFIG.relayRedundancy}}
+    if (CONFIG.turnConfig.length) cfg.turnConfig = CONFIG.turnConfig
+    if (myPass) cfg.password = myPass
+    room = joinRoom(cfg, CONFIG.roomId)
     wireRoom(room)
     updateStatusLoop()
-  } catch (err) {
-    showFatal(err)
-  }
+  } catch (err) { showFatal(err) }
 }
-
 function showFatal(err) {
   statusDot.className = 'dot dot--off'
   statusText.textContent = 'Connection failed'
   addSystem(!window.isSecureContext
-    ? 'Could not start: this page must be served over HTTPS (or http://localhost). Open it from a secure URL and reload.'
+    ? 'Could not start: serve this over HTTPS (or http://localhost) and reload.'
     : `Could not connect: ${(err && err.message) || 'unknown error'}. Try reloading.`)
+}
+
+function allow(peerId, channel) {
+  const [n, ms] = CONFIG.flood[channel] || CONFIG.flood.msg
+  const k = peerId + ':' + channel
+  const now = Date.now()
+  const s = floodState.get(k)
+  if (!s || now - s.start > ms) { floodState.set(k, {count: 1, start: now}); return true }
+  s.count++
+  return s.count <= n
 }
 
 function wireRoom(room) {
@@ -579,96 +966,143 @@ function wireRoom(room) {
   const name = room.makeAction('name')
   const typing = room.makeAction('typing')
   const hist = room.makeAction('hist')
-  actions = {msg, name, typing, hist}
+  const histReq = room.makeAction('histreq')
+  const react = room.makeAction('react')
+  const presence = room.makeAction('presence')
+  actions = {msg, name, typing, hist, histReq, react, presence}
 
-  // Live chat message.
   msg.onMessage = (data, {peerId}) => {
-    if (!data || typeof data.text !== 'string') return
-    const text = clampStr(data.text, CONFIG.maxMsgLen)
+    if (!data || typeof data.id !== 'string' || !allow(peerId, 'msg')) return
+    const text = sanitize(data.text, CONFIG.maxMsgLen)
     if (!text) return
-    if (!allowFromPeer(peerId)) return
-    if (typeof data.name === 'string') setPeerName(peerId, data.name)
+    if (typeof data.name === 'string') setPeerName(peerId, data.name, true)
     clearPeerTyping(peerId)
+    // id namespaced by the TRUSTED transport peerId — a peer can't claim another's id-space
     addMessage({
-      id: typeof data.id === 'string' ? data.id : `${peerId}-${data.t || Date.now()}-r${seq++}`,
-      t: typeof data.t === 'number' ? data.t : Date.now(),
+      id: keyOf(peerId, clampStr(data.id, 64)),
+      t: validT(data.t),
       peerId,
       name: nameOf(peerId),
       text,
+      emote: !!data.emote,
+      reply: parseReply(data.reply),
     }, false)
   }
 
-  // History hand-off: an existing peer sends a newcomer the recent conversation.
-  hist.onMessage = (data, {peerId}) => {
-    if (!Array.isArray(data)) return
+  hist.onMessage = (arr, {peerId}) => {
+    if (!Array.isArray(arr) || histAcceptedFrom.has(peerId)) return
+    // Only accept a history burst from the elected sender (lowest peer id), so a
+    // random peer can't push a forged/censored history to newcomers.
+    if (peerId !== lowestPeer()) return
+    histAcceptedFrom.add(peerId)            // and only one burst from them
     let added = false
-    for (const m of data.slice(0, CONFIG.historyShare * 3)) {
-      if (!m || typeof m.id !== 'string' || typeof m.text !== 'string') continue
-      const text = clampStr(m.text, CONFIG.maxMsgLen)
+    for (const m of arr.slice(0, CONFIG.historyShare)) {
+      if (!m || typeof m.id !== 'string' || typeof m.peerId !== 'string') continue
+      const text = sanitize(m.text, CONFIG.maxMsgLen)
       if (!text) continue
-      if (addEntry({
-        kind: 'msg',
-        id: m.id,
-        t: typeof m.t === 'number' ? m.t : Date.now(),
-        peerId: typeof m.peerId === 'string' ? m.peerId : peerId,
-        name: clampStr(m.name, CONFIG.maxNameLen) || shortId(m.peerId || peerId),
-        text,
-      })) added = true
+      const author = clampStr(m.peerId, 64)
+      const key = keyOf(author, clampStr(m.id, 64))   // namespaced by claimed AUTHOR for cross-relayer dedupe
+      if (addEntry({kind: 'msg', id: key, t: validT(m.t), peerId: author, name: sanitize(m.name, CONFIG.maxNameLen) || shortId(author), text, emote: !!m.emote, reply: parseReply(m.reply)})) added = true
+      if (m.reacts && typeof m.reacts === 'object') {  // re-hydrate reaction counts
+        for (const em of Object.keys(m.reacts).slice(0, 24)) {
+          const list = m.reacts[em]
+          if (Array.isArray(list)) list.slice(0, 60).forEach(pid => applyReaction(key, sanitize(em, 8), clampStr(pid, 64), true))
+        }
+      }
     }
     if (added) renderTimeline({stick: true})
   }
 
-  // Peer announces / updates their name.
-  name.onMessage = (value, {peerId}) => setPeerName(peerId, value)
-
-  // Typing state.
-  typing.onMessage = (value, {peerId}) => { value ? markPeerTyping(peerId) : clearPeerTyping(peerId) }
-
-  room.onPeerJoin = peerId => {
-    if (!peers.has(peerId)) peers.set(peerId, {name: null})
-    name.send(myName, {target: peerId}) // greet the newcomer with my name
-    // Hand off my recent history so they can see the ongoing conversation.
-    const recent = timeline
-      .filter(e => e.kind === 'msg')
-      .slice(-CONFIG.historyShare)
-      .map(e => ({id: e.id, t: e.t, peerId: e.peerId, name: e.name, text: e.text}))
-    if (recent.length) hist.send(recent, {target: peerId})
-    renderRoster()
+  // a newcomer who got no history asks for it; the next-lowest peer answers
+  histReq.onMessage = (_d, {peerId}) => {
+    if (!allow(peerId, 'presence')) return
+    if (electedHistSender(peerId)) sendHistoryTo(peerId)
   }
 
+  name.onMessage = (value, {peerId}) => { if (allow(peerId, 'name')) setPeerName(peerId, value) }
+  typing.onMessage = (value, {peerId}) => { if (!allow(peerId, 'typing')) return; value ? markPeerTyping(peerId) : clearPeerTyping(peerId) }
+  presence.onMessage = (value, {peerId}) => {
+    if (!allow(peerId, 'presence')) return
+    const p = peers.get(peerId); if (!p) return
+    p.presence = value === 'idle' ? 'idle' : 'active'
+    renderRoster()
+  }
+  react.onMessage = (d, {peerId}) => {
+    if (!d || typeof d.target !== 'string' || !allow(peerId, 'react')) return
+    if (isMuted(peerId)) return              // muted peers' reactions don't register
+    if (!seenIds.has(d.target)) return       // ignore reactions to messages we don't have
+    applyReaction(d.target, sanitize(d.emoji, 8), peerId, !!d.on)
+  }
+
+  room.onPeerJoin = peerId => {
+    if (!peers.has(peerId)) peers.set(peerId, {name: null, presence: 'active'})
+    name.send(myName, {target: peerId})
+    presence.send(myPresence, {target: peerId})
+    if (electedHistSender(peerId)) sendHistoryTo(peerId)   // only the lowest-id peer hands off
+    renderRoster()
+    if (!timeline.some(e => e.kind === 'msg')) refreshEmpty()  // "No messages yet"
+    maybeMeshWarn()
+  }
   room.onPeerLeave = peerId => {
     const left = nameOf(peerId)
     const existed = peers.delete(peerId)
-    clearPeerTyping(peerId)
-    floodState.delete(peerId)
+    clearPeerTyping(peerId); histAcceptedFrom.delete(peerId)
+    for (const ch in CONFIG.flood) floodState.delete(peerId + ':' + ch)   // clear all channels
     renderRoster()
-    if (existed) addSystem(`${left} left`)
+    if (existed && !isMuted(peerId)) addPresenceSys(`${left} left`)
+    if (!timeline.some(e => e.kind === 'msg')) refreshEmpty()
   }
+
+  // if nobody hands us history shortly after joining, ask for it
+  setTimeout(() => { if (actions && peers.size > 0 && !timeline.some(e => e.kind === 'msg')) actions.histReq.send(1) }, 2500)
 }
 
-function allowFromPeer(peerId) {
-  const now = Date.now()
-  const s = floodState.get(peerId)
-  if (!s || now - s.start > CONFIG.floodWindowMs) { floodState.set(peerId, {count: 1, start: now}); return true }
-  s.count++
-  return s.count <= CONFIG.floodMax
+// elect a single history sender: the lowest selfId among peers I know (excluding the newcomer)
+function electedHistSender(newcomerId) {
+  let lowest = selfId
+  for (const id of peers.keys()) { if (id !== newcomerId && id < lowest) lowest = id }
+  return lowest === selfId
+}
+function lowestPeer() { let lo = null; for (const id of peers.keys()) if (lo === null || id < lo) lo = id; return lo }
+function serializeReacts(key) {
+  const m = reactions.get(key); if (!m || !m.size) return null
+  const o = {}; for (const [em, set] of m) if (set.size) o[em] = [...set]
+  return Object.keys(o).length ? o : null
+}
+function sendHistoryTo(peerId) {
+  const recent = timeline.filter(e => e.kind === 'msg').slice(-CONFIG.historyShare)
+    .map(e => ({id: rawIdOf(e.id), t: e.t, peerId: e.peerId, name: e.name, text: e.text, emote: e.emote, reply: e.reply, reacts: serializeReacts(e.id)}))
+  if (recent.length && actions) actions.hist.send(recent, {target: peerId})
+}
+const rawIdOf = key => { const i = key.indexOf('::'); return i < 0 ? key : key.slice(i + 2) }
+
+function parseReply(r) {
+  if (!r || typeof r.key !== 'string') return null
+  const own = timeline.find(e => e.id === r.key)
+  // Never trust a peer's claimed quote author/text. If we can't resolve the
+  // referenced message in our own timeline, show a neutral placeholder.
+  if (!own) return {key: clampStr(r.key, 130), unresolved: true}
+  return {key: clampStr(r.key, 130), name: own.peerId === selfId ? 'You' : own.name, snippet: own.text.slice(0, 120)}
 }
 
-function setPeerName(peerId, value) {
-  const name = clampStr(value, CONFIG.maxNameLen).trim()
-  if (!name) return
-  if (!peers.has(peerId)) return // don't resurrect a peer that already left
-  const prev = peers.get(peerId).name
-  if (prev === name) return
-  peers.set(peerId, {name})
-  if (!prev) addSystem(`${name} joined`)
-  else addSystem(`${prev} is now ${name}`)
+function setPeerName(peerId, value, fromMsg) {
+  const name = sanitize(value, CONFIG.maxNameLen).trim()
+  if (!name || !peers.has(peerId)) return
+  const p = peers.get(peerId)
+  if (p.name === name) return
+  const prev = p.name
+  p.name = name
+  if (!isMuted(peerId)) addPresenceSys(prev ? `${prev} is now ${name}` : `${name} joined`)
   renderRoster()
   if (typingTimers.has(peerId)) renderTyping()
 }
 
+function maybeMeshWarn() {
+  if (peers.size + 1 > CONFIG.meshCap && CONFIG.isDefaultRoom) showMeshBanner()
+}
+
 /* ------------------------------------------------------------------ *
- * Typing indicators
+ * Typing + presence
  * ------------------------------------------------------------------ */
 function markPeerTyping(peerId) {
   if (!peers.has(peerId)) return
@@ -680,19 +1114,28 @@ function clearPeerTyping(peerId) {
   if (typingTimers.has(peerId)) { clearTimeout(typingTimers.get(peerId)); typingTimers.delete(peerId); renderTyping() }
 }
 function renderTyping() {
-  const names = [...typingTimers.keys()].map(nameOf)
-  if (!names.length) { typingEl.hidden = true; typingEl.replaceChildren(); return }
-  let label
+  const names = [...typingTimers.keys()].filter(id => !isMuted(id)).map(nameOf)
+  let label = ''
   if (names.length === 1) label = `${names[0]} is typing`
   else if (names.length === 2) label = `${names[0]} and ${names[1]} are typing`
-  else label = 'Several people are typing'
-  const dots = document.createElement('span')
-  dots.className = 'dots'
+  else if (names.length > 2) label = 'Several people are typing'
+  if (!label) { typingEl.hidden = true; typingEl.replaceChildren(); return }
+  const dots = document.createElement('span'); dots.className = 'dots'
   dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'))
-  const txt = document.createElement('span')
-  txt.textContent = label
+  const txt = document.createElement('span'); txt.textContent = label
   typingEl.replaceChildren(txt, dots)
   typingEl.hidden = false
+}
+
+function setMyPresence(p) {
+  if (myPresence === p) return
+  myPresence = p
+  if (actions) actions.presence.send(p)
+}
+function bumpActivity() {
+  setMyPresence('active')
+  clearTimeout(idleTimer)
+  idleTimer = setTimeout(() => setMyPresence('idle'), CONFIG.idleMs)
 }
 
 /* ------------------------------------------------------------------ *
@@ -703,58 +1146,85 @@ function renderRoster() {
   onlineCountEl.textContent = String(count)
   peopleCountEl.textContent = String(count)
   const frag = document.createDocumentFragment()
-  frag.appendChild(personRow(selfId, myName, true))
+  frag.appendChild(personRow(selfId, myName, true, 'active'))
   ;[...peers.entries()]
     .sort((a, b) => Number(!!b[1].name) - Number(!!a[1].name))
-    .forEach(([id, p]) => frag.appendChild(personRow(id, p.name, false)))
+    .forEach(([id, p]) => frag.appendChild(personRow(id, p.name, false, p.presence)))
   peopleListEl.replaceChildren(frag)
 }
-function personRow(id, name, isSelf) {
+function personRow(id, name, isSelf, presence) {
   const li = document.createElement('li')
-  li.className = 'person' + (!isSelf && !name ? ' pending' : '')
+  li.className = 'person' + (!isSelf && !name ? ' pending' : '') + (presence === 'idle' ? ' idle' : '')
   const av = document.createElement('div')
-  av.className = 'avatar'
-  av.style.background = colorOf(id)
-  av.textContent = initialOf(name || '?')
+  av.className = 'avatar'; av.style.background = colorOf(id); av.textContent = initialOf(name || '?')
   const nm = document.createElement('span')
-  nm.className = 'pname'
-  nm.textContent = name || 'connecting…'
+  nm.className = 'pname'; nm.textContent = name || 'connecting…'
   li.append(av, nm)
-  if (isSelf) {
-    const tag = document.createElement('span')
-    tag.className = 'tag'
-    tag.textContent = 'you'
-    li.appendChild(tag)
+  if (!isSelf && name && nameIsDuplicated(id, name)) li.appendChild(badge(id))
+  if (isSelf) { const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'you'; li.appendChild(tag) }
+  else {
+    const mb = document.createElement('button')
+    mb.type = 'button'; mb.className = 'mutebtn'; mb.textContent = isMuted(id) ? 'unmute' : 'mute'
+    mb.title = isMuted(id) ? 'Unmute (this session)' : 'Mute (this session only)'
+    mb.addEventListener('click', () => toggleMute(id))
+    li.appendChild(mb)
   }
   return li
 }
+function toggleMute(peerId) {
+  if (muted.has(peerId)) muted.delete(peerId); else muted.add(peerId)
+  clearPeerTyping(peerId)
+  renderRoster(); renderTimeline()
+}
 
 /* ------------------------------------------------------------------ *
- * Sending
+ * Sending + slash commands
  * ------------------------------------------------------------------ */
 function sendMessage() {
-  const text = clampStr(inputEl.value, CONFIG.maxMsgLen).trim()
+  const raw = inputEl.value
+  const text = sanitize(raw, CONFIG.maxMsgLen).trim()
   if (!text || !actions) return
-  const entry = {id: newMsgId(), t: Date.now(), peerId: selfId, name: myName, text}
-  actions.msg.send({id: entry.id, t: entry.t, name: myName, text})
+  if (text[0] === '/' && handleSlash(text)) { inputEl.value = ''; stopTyping(); updateSendBtn(); return }
+  const rawId = newRawId()
+  const entry = {id: keyOf(selfId, rawId), t: Date.now(), peerId: selfId, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null}
+  actions.msg.send({id: rawId, t: entry.t, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null})
   addMessage(entry, true)
-  inputEl.value = ''
-  stopTyping()
-  updateSendBtn()
-  inputEl.focus()
+  inputEl.value = ''; cancelReply(); stopTyping(); updateSendBtn(); inputEl.focus()
+}
+
+function handleSlash(text) {
+  const [cmd, ...rest] = text.slice(1).split(' ')
+  const arg = rest.join(' ').trim()
+  switch (cmd.toLowerCase()) {
+    case 'nick': {
+      const n = sanitize(arg, CONFIG.maxNameLen).trim()
+      if (!n) { addSystem('Usage: /nick <new name>'); return true }
+      const old = myName; setMyName(n)
+      if (actions) actions.name.send(myName)
+      addSystem(`You are now "${myName}" (was "${old}")`)
+      return true
+    }
+    case 'me': {
+      const text = sanitize(arg, CONFIG.maxMsgLen)
+      if (text) { const rawId = newRawId(), id = keyOf(selfId, rawId), t = Date.now(); actions.msg.send({id: rawId, t, name: myName, text, emote: true}); addMessage({id, t, peerId: selfId, name: myName, text, emote: true}, true) }
+      return true
+    }
+    case 'who': addSystem('Here now: ' + [myName + ' (you)', ...[...peers.values()].map(p => p.name).filter(Boolean)].join(', ')); return true
+    case 'clear': timeline.length = 0; seenIds.clear(); reactions.clear(); renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
+    case 'shrug': inputEl.value = '¯\\_(ツ)_/¯'; sendMessage(); return true
+    case 'help': addSystem('Commands: /nick <name> · /me <action> · /who · /clear · /shrug · /help'); return true
+    default: addSystem(`Unknown command: /${cmd} — try /help`); return true
+  }
 }
 
 function onLocalInput() {
-  updateSendBtn()
+  updateSendBtn(); bumpActivity()
   if (!actions) return
   if (inputEl.value.trim()) {
     const now = Date.now()
     if (!iTyping || now - typingSentAt > 1500) { actions.typing.send(true); iTyping = true; typingSentAt = now }
-    clearTimeout(typingStopTimer)
-    typingStopTimer = setTimeout(stopTyping, 2500)
-  } else {
-    stopTyping()
-  }
+    clearTimeout(typingStopTimer); typingStopTimer = setTimeout(stopTyping, 2500)
+  } else stopTyping()
 }
 function stopTyping() {
   clearTimeout(typingStopTimer); typingStopTimer = null
@@ -764,122 +1234,346 @@ function stopTyping() {
 function updateSendBtn() { sendBtn.disabled = !inputEl.value.trim() }
 
 /* ------------------------------------------------------------------ *
- * Connection status
+ * Connection status + relay/ping panel
  * ------------------------------------------------------------------ */
+let prevRelays = 0, noPeerSince = 0
+function relayStates() {
+  try { return Object.entries(getRelaySockets() || {}).map(([url, s]) => ({url, open: s && s.readyState === 1})) } catch { return [] }
+}
 function updateStatusLoop() {
   const tick = () => {
-    let relays = 0
-    try { relays = Object.values(getRelaySockets() || {}).filter(s => s && s.readyState === 1).length } catch {}
-    if (peers.size > 0) { statusDot.className = 'dot dot--on'; statusText.textContent = `${peers.size + 1} online` }
-    else if (relays > 0) { statusDot.className = 'dot dot--wait'; statusText.textContent = 'Waiting for people…' }
-    else { statusDot.className = 'dot dot--off'; statusText.textContent = 'Connecting…' }
+    const states = relayStates()
+    const relays = states.filter(s => s.open).length
+    const online = peers.size
+    if (online > 0) { statusDot.className = 'dot dot--on'; setStatus(`${online + 1} online`) }
+    else if (relays > 0 && prevRelays > 0 && relays < prevRelays && noPeerSince) { statusDot.className = 'dot dot--wait'; setStatus('Reconnecting…') }
+    else if (relays > 0) {
+      if (!noPeerSince) noPeerSince = Date.now()
+      const stuck = Date.now() - noPeerSince > 12000
+      statusDot.className = 'dot dot--wait'
+      setStatus(stuck ? 'Relays up, no peers — strict NAT?' : 'Waiting for people…')
+    } else { statusDot.className = 'dot dot--off'; setStatus(navigator.onLine === false ? 'Offline' : 'Connecting…') }
+    if (online > 0) noPeerSince = 0
+    prevRelays = relays
   }
-  tick()
-  setInterval(tick, 2000)
+  tick(); setInterval(tick, 2000)
 }
+function setStatus(t) { if (statusText.textContent !== t) { statusText.textContent = t; announceStatus(t) } }
+
+async function openStatusPanel() {
+  statusPanel.replaceChildren()
+  const h = document.createElement('div'); h.className = 'sp-h'; h.textContent = 'Relays'; statusPanel.appendChild(h)
+  for (const s of relayStates()) {
+    const r = document.createElement('div'); r.className = 'sp-row'
+    const d = document.createElement('span'); d.className = 'dot ' + (s.open ? 'dot--on' : 'dot--off')
+    const u = document.createElement('span'); u.className = 'sp-url'; u.textContent = s.url.replace('wss://', '')
+    r.append(d, u); statusPanel.appendChild(r)
+  }
+  const ph = document.createElement('div'); ph.className = 'sp-h'; ph.textContent = 'Peers'; statusPanel.appendChild(ph)
+  if (!peers.size) { const e = document.createElement('div'); e.className = 'sp-row'; e.textContent = 'none yet'; statusPanel.appendChild(e) }
+  for (const id of peers.keys()) {
+    const r = document.createElement('div'); r.className = 'sp-row'
+    const u = document.createElement('span'); u.className = 'sp-url'; u.textContent = nameOf(id)
+    const ms = document.createElement('span'); ms.className = 'sp-ms'; ms.textContent = '…'
+    r.append(u, ms); statusPanel.appendChild(r)
+    if (room && room.ping) room.ping(id).then(v => { ms.textContent = Math.round(v) + 'ms' }).catch(() => { ms.textContent = '—' })
+  }
+  statusPanel.hidden = false
+}
+function toggleStatusPanel() { statusPanel.hidden ? openStatusPanel() : (statusPanel.hidden = true) }
 
 /* ------------------------------------------------------------------ *
- * Emoji picker
+ * Emoji picker (search + recents + keyboard)
  * ------------------------------------------------------------------ */
-const EMOJI = ('😀 😁 😂 🤣 😊 😍 😘 😎 🤩 🥳 😉 🙂 🙃 😇 🤔 🤨 😴 😭 😢 😅 ' +
-  '😤 😠 😡 🥺 😱 🤯 🤗 🤭 🫡 🫠 👍 👎 👏 🙌 🙏 💪 🤝 👋 ✌️ 🤞 ' +
-  '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 💯 🔥 ✨ 🎉 🎊 ⭐ 🌟 ⚡ 💥 ☀️ 🌙 ' +
-  '🍕 🍔 🍟 🍰 🍺 ☕ 🎮 🎵 ⚽ 🏆 🚀 💻 📱 💡 ✅ ❌ ❓ ❗ 👀 💬').split(' ')
-
-function buildEmoji() {
-  EMOJI.forEach(e => {
-    const b = document.createElement('button')
-    b.type = 'button'
-    b.textContent = e
-    b.addEventListener('click', () => { insertAtCursor(e); emojiPanel.hidden = true; inputEl.focus() })
-    emojiPanel.appendChild(b)
-  })
+const EMOJI = [
+  ['😀','grin happy'],['😁','beam'],['😂','laugh tears'],['🤣','rofl'],['😊','blush smile'],['😍','love heart eyes'],['😘','kiss'],['😎','cool sunglasses'],['🤩','star struck'],['🥳','party'],
+  ['😉','wink'],['🙂','slight smile'],['🙃','upside down'],['😇','angel'],['🤔','thinking'],['🤨','raised brow'],['😴','sleep'],['😭','cry sob'],['😢','tear sad'],['😅','sweat grin'],
+  ['😤','huff'],['😠','angry'],['😡','rage mad'],['🥺','pleading'],['😱','scream shock'],['🤯','mind blown'],['🤗','hug'],['🤭','giggle oops'],['🫡','salute'],['🫠','melt'],
+  ['👍','thumbs up yes'],['👎','thumbs down no'],['👏','clap'],['🙌','praise raise'],['🙏','pray thanks'],['💪','muscle strong'],['🤝','handshake deal'],['👋','wave hi bye'],['✌️','peace'],['🤞','fingers crossed'],
+  ['❤️','heart love red'],['🧡','orange heart'],['💛','yellow heart'],['💚','green heart'],['💙','blue heart'],['💜','purple heart'],['🖤','black heart'],['🤍','white heart'],['💔','broken heart'],['💯','hundred perfect'],
+  ['🔥','fire lit'],['✨','sparkle'],['🎉','party tada'],['🎊','confetti'],['⭐','star'],['🌟','glow star'],['⚡','zap lightning'],['💥','boom'],['☀️','sun'],['🌙','moon night'],
+  ['🍕','pizza'],['🍔','burger'],['🍟','fries'],['🍰','cake'],['🍺','beer'],['☕','coffee'],['🎮','game'],['🎵','music note'],['⚽','soccer ball'],['🏆','trophy win'],
+  ['🚀','rocket launch'],['💻','laptop code'],['📱','phone'],['💡','idea bulb'],['✅','check done'],['❌','cross no'],['❓','question'],['❗','exclaim'],['👀','eyes look'],['💬','chat speech'],
+]
+let recents = []
+try { recents = JSON.parse(localStorage.getItem('c2c-emoji') || '[]').filter(x => typeof x === 'string').slice(0, 16) } catch {}
+function buildEmoji(filter) {
+  emojiGrid.replaceChildren()
+  const f = (filter || '').trim().toLowerCase()
+  if (!f && recents.length) {
+    const head = document.createElement('div'); head.className = 'emoji-sec'; head.textContent = 'Recent'; emojiGrid.appendChild(head)
+    recents.forEach(e => emojiGrid.appendChild(emojiCell(e, e)))
+    const head2 = document.createElement('div'); head2.className = 'emoji-sec'; head2.textContent = 'All'; emojiGrid.appendChild(head2)
+  }
+  EMOJI.filter(([e, k]) => !f || k.includes(f) || e === f).forEach(([e, k]) => emojiGrid.appendChild(emojiCell(e, k)))
+  rove()
+}
+function emojiCell(e, label) {
+  const b = document.createElement('button')
+  b.type = 'button'; b.textContent = e; b.tabIndex = -1
+  b.setAttribute('aria-label', label.split(' ')[0])
+  b.addEventListener('click', () => pickEmoji(e))
+  return b
+}
+function pickEmoji(e) {
+  insertAtCursor(e)
+  recents = [e, ...recents.filter(x => x !== e)].slice(0, 16)
+  try { localStorage.setItem('c2c-emoji', JSON.stringify(recents)) } catch {}
+  emojiPanel.hidden = true; inputEl.focus()
 }
 function insertAtCursor(text) {
-  const start = inputEl.selectionStart ?? inputEl.value.length
-  const end = inputEl.selectionEnd ?? inputEl.value.length
-  const next = (inputEl.value.slice(0, start) + text + inputEl.value.slice(end)).slice(0, CONFIG.maxMsgLen)
-  inputEl.value = next
-  const pos = Math.min(start + text.length, next.length)
-  inputEl.setSelectionRange(pos, pos)
-  updateSendBtn()
+  const s = inputEl.selectionStart ?? inputEl.value.length
+  const en = inputEl.selectionEnd ?? inputEl.value.length
+  inputEl.value = (inputEl.value.slice(0, s) + text + inputEl.value.slice(en)).slice(0, CONFIG.maxMsgLen)
+  const pos = Math.min(s + text.length, inputEl.value.length)
+  inputEl.setSelectionRange(pos, pos); updateSendBtn()
+}
+// roving tabindex over the emoji buttons
+function rove() {
+  const btns = [...emojiGrid.querySelectorAll('button')]
+  btns.forEach((b, i) => b.tabIndex = i === 0 ? 0 : -1)
+}
+emojiGrid.addEventListener('keydown', e => {
+  const btns = [...emojiGrid.querySelectorAll('button')]
+  let i = btns.indexOf(document.activeElement)
+  if (i < 0) return
+  const cols = Math.max(1, Math.floor(emojiGrid.clientWidth / 40))
+  if (e.key === 'ArrowRight') i++; else if (e.key === 'ArrowLeft') i--
+  else if (e.key === 'ArrowDown') i += cols; else if (e.key === 'ArrowUp') i -= cols
+  else return
+  e.preventDefault()
+  const t = btns[Math.max(0, Math.min(btns.length - 1, i))]
+  if (t) { btns.forEach(b => b.tabIndex = -1); t.tabIndex = 0; t.focus() }
+})
+
+/* ------------------------------------------------------------------ *
+ * Rooms / share code
+ * ------------------------------------------------------------------ */
+function shareUrl(code = CONFIG.roomCode) { return location.origin + (code ? '/#r=' + code : '/') }
+function genCode() {
+  const a = 'abcdefghijkmnpqrstuvwxyz23456789'
+  let s = ''
+  for (let i = 0; i < 7; i++) s += a[Math.floor(Math.random() * a.length)]
+  return s
+}
+function copyText(text, btn, restore) {
+  const done = ok => { if (btn) { btn.textContent = ok ? '✓ Copied' : 'Copy failed'; setTimeout(() => { btn.textContent = restore }, 1400) } }
+  try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)) } catch { done(false) }
+}
+function openSharePanel() {
+  shareCodeEl.textContent = CONFIG.isDefaultRoom ? '(public room — make a private one below)' : CONFIG.roomCode
+  sharePanel.hidden = false
+}
+function gotoRoom(code, pass) {
+  const url = shareUrl(code) + (pass ? '' : '')
+  // navigate (full load) into the new room; password is never put in the URL
+  if (pass) sessionStorage.setItem('c2c-pass-' + code, pass)
+  location.href = url
+}
+function showMeshBanner() {
+  if (!bannerEl.hidden) return
+  bannerEl.replaceChildren()
+  const t = document.createElement('span'); t.textContent = `Busy room (${peers.size + 1} here). Big meshes get heavy — `
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'banner-btn'; b.textContent = 'open an overflow room'
+  b.addEventListener('click', () => gotoRoom(genCode(), ''))
+  const x = document.createElement('button'); x.type = 'button'; x.className = 'banner-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Dismiss')
+  x.addEventListener('click', () => { bannerEl.hidden = true })
+  bannerEl.append(t, b, x); bannerEl.hidden = false
 }
 
 /* ------------------------------------------------------------------ *
- * Side panels (rules + people) — slide-in overlays on mobile
+ * Theme + safe-view blur
  * ------------------------------------------------------------------ */
-function syncScrim() {
-  scrim.hidden = !(peopleEl.classList.contains('open') || rulesEl.classList.contains('open'))
+const THEMES = ['system', 'dark', 'light']
+let theme = 'system'
+try { theme = localStorage.getItem('c2c-theme') || 'system' } catch {}
+function applyTheme() {
+  document.documentElement.dataset.theme = theme
+  themeBtn.textContent = theme === 'light' ? '☀️' : theme === 'dark' ? '🌙' : '🌗'
+  themeBtn.title = 'Theme: ' + theme
 }
-function showPeople(open) {
-  peopleEl.classList.toggle('open', open)
-  if (open) rulesEl.classList.remove('open')
-  peopleToggle.setAttribute('aria-expanded', String(open))
+function cycleTheme() {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
+  try { localStorage.setItem('c2c-theme', theme) } catch {}
+  applyTheme()
+}
+let safeView = false
+try { safeView = localStorage.getItem('c2c-safe') === '1' } catch {}
+function applyBlur() {
+  document.body.classList.toggle('safe-view', safeView)
+  blurBtn.setAttribute('aria-pressed', String(safeView))
+  blurBtn.title = safeView ? 'Safe view on (messages blurred until hover)' : 'Safe view off'
+}
+function toggleBlur() { safeView = !safeView; try { localStorage.setItem('c2c-safe', safeView ? '1' : '0') } catch {}; applyBlur() }
+
+/* ------------------------------------------------------------------ *
+ * Unread badge
+ * ------------------------------------------------------------------ */
+const BASE_TITLE = 'Global Free Speech'
+function favicon(count) {
+  const c = count > 0 ? `<circle cx='74' cy='26' r='24' fill='%23ff5b7f'/><text x='74' y='35' font-size='34' text-anchor='middle' fill='white'>${count > 9 ? '9+' : count}</text>` : ''
+  return `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text>${c}</svg>`
+}
+function setUnread(n) {
+  unread = n
+  document.title = n > 0 ? `(${n}) ${BASE_TITLE}` : BASE_TITLE
+  let link = document.querySelector('link[rel=icon]')
+  if (link) link.href = favicon(n)
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setUnread(0) })
+
+/* ------------------------------------------------------------------ *
+ * a11y live region
+ * ------------------------------------------------------------------ */
+// Two separate polite regions so status/typing and new messages don't clobber
+// each other (and #messages itself is aria-live=off to avoid re-announce spam on
+// full re-renders). Transient "typing" is intentionally NOT announced (noise).
+let msgAnnTimer = null, sysAnnTimer = null
+function announceMsg(text) { if (!liveRegion) return; clearTimeout(msgAnnTimer); msgAnnTimer = setTimeout(() => { liveRegion.textContent = text }, 200) }
+function announceStatus(text) { if (!liveSys) return; clearTimeout(sysAnnTimer); sysAnnTimer = setTimeout(() => { liveSys.textContent = text }, 350) }
+
+/* ------------------------------------------------------------------ *
+ * Panels (focus-trap on mobile drawers) + Escape
+ * ------------------------------------------------------------------ */
+let lastTrigger = null
+// The sidebars are off-canvas drawers ONLY at <=720px; on desktop they're static
+// columns. Modal/focus-trap behavior must apply to the drawer case only, else the
+// always-visible desktop sidebar becomes a keyboard trap (WCAG 2.1.2).
+const isDrawer = () => matchMedia('(max-width: 720px)').matches
+function syncScrim() { scrim.hidden = !(peopleEl.classList.contains('open') || rulesEl.classList.contains('open')) }
+function openAside(el, toggle) {
+  ;(el === peopleEl ? rulesEl : peopleEl).classList.remove('open')
+  el.classList.add('open')
+  toggle.setAttribute('aria-expanded', 'true'); syncScrim()
+  if (isDrawer()) {
+    el.setAttribute('aria-modal', 'true'); el.setAttribute('role', 'dialog')
+    lastTrigger = toggle
+    const f = el.querySelector('.side-close'); if (f && f.offsetParent !== null) f.focus()
+  }
+}
+function closeAside(el) {
+  el.classList.remove('open'); el.removeAttribute('aria-modal'); el.removeAttribute('role')
+  peopleToggle.setAttribute('aria-expanded', String(peopleEl.classList.contains('open')))
   rulesToggle.setAttribute('aria-expanded', String(rulesEl.classList.contains('open')))
   syncScrim()
+  if (lastTrigger) { lastTrigger.focus(); lastTrigger = null }
 }
-function showRules(open) {
-  rulesEl.classList.toggle('open', open)
-  if (open) peopleEl.classList.remove('open')
-  rulesToggle.setAttribute('aria-expanded', String(open))
-  peopleToggle.setAttribute('aria-expanded', String(peopleEl.classList.contains('open')))
-  syncScrim()
+function closePanels() { for (const el of [peopleEl, rulesEl]) if (el.classList.contains('open')) closeAside(el) }
+function trapTab(e) {
+  if (e.key !== 'Tab' || !isDrawer()) return
+  const open = peopleEl.classList.contains('open') ? peopleEl : rulesEl.classList.contains('open') ? rulesEl : null
+  if (!open) return
+  const f = [...open.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])')].filter(x => x.offsetParent !== null)
+  if (!f.length) return
+  const first = f[0], last = f[f.length - 1]
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
 }
-function closePanels() { showPeople(false); showRules(false) }
 
 /* ------------------------------------------------------------------ *
  * Wire up UI
  * ------------------------------------------------------------------ */
 sendBtn.addEventListener('click', sendMessage)
 inputEl.addEventListener('input', onLocalInput)
-inputEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } })
-
-emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPanel.hidden = !emojiPanel.hidden })
-document.addEventListener('click', e => {
-  if (!emojiPanel.hidden && !emojiPanel.contains(e.target) && e.target !== emojiBtn) emojiPanel.hidden = true
+inputEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+  else if (e.key === 'Escape' && replyTo) cancelReply()
 })
+replyCancel.addEventListener('click', cancelReply)
 
-peopleToggle.addEventListener('click', () => showPeople(!peopleEl.classList.contains('open')))
-peopleClose.addEventListener('click', () => showPeople(false))
-rulesToggle.addEventListener('click', () => showRules(!rulesEl.classList.contains('open')))
-rulesClose.addEventListener('click', () => showRules(false))
+emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPanel.hidden = !emojiPanel.hidden; if (!emojiPanel.hidden) { emojiSearch.value = ''; buildEmoji(''); emojiSearch.focus() } })
+emojiSearch.addEventListener('input', () => buildEmoji(emojiSearch.value))
+document.addEventListener('click', e => { if (!emojiPanel.hidden && !emojiPanel.contains(e.target) && e.target !== emojiBtn) emojiPanel.hidden = true })
+
+statusBtn.addEventListener('click', e => { e.stopPropagation(); toggleStatusPanel() })
+document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) statusPanel.hidden = true })
+
+shareBtn.addEventListener('click', e => { e.stopPropagation(); sharePanel.hidden ? openSharePanel() : (sharePanel.hidden = true) })
+document.addEventListener('click', e => { if (!sharePanel.hidden && !sharePanel.contains(e.target) && !shareBtn.contains(e.target)) sharePanel.hidden = true })
+shareLinkBtn.addEventListener('click', () => copyText(shareUrl(), shareLinkBtn, '🔗 Copy link'))
+shareCodeBtn.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, shareCodeBtn, '# Copy code') })
+shareNewBtn.addEventListener('click', () => gotoRoom(genCode(), ''))
+
+themeBtn.addEventListener('click', cycleTheme)
+blurBtn.addEventListener('click', toggleBlur)
+
+peopleToggle.addEventListener('click', () => peopleEl.classList.contains('open') ? closeAside(peopleEl) : openAside(peopleEl, peopleToggle))
+peopleClose.addEventListener('click', () => closeAside(peopleEl))
+rulesToggle.addEventListener('click', () => rulesEl.classList.contains('open') ? closeAside(rulesEl) : openAside(rulesEl, rulesToggle))
+rulesClose.addEventListener('click', () => closeAside(rulesEl))
 scrim.addEventListener('click', closePanels)
 document.addEventListener('keydown', e => {
+  if (e.key === 'Tab') trapTab(e)
   if (e.key !== 'Escape') return
-  if (!emojiPanel.hidden) { emojiPanel.hidden = true; inputEl.focus(); return }
+  if (!emojiPanel.hidden) { emojiPanel.hidden = true; emojiBtn.focus(); return }
+  if (!sharePanel.hidden) { sharePanel.hidden = true; return }
+  if (!statusPanel.hidden) { statusPanel.hidden = true; return }
+  if (reactMenu) { closeReactMenu(); return }
   if (peopleEl.classList.contains('open') || rulesEl.classList.contains('open')) closePanels()
 })
+;['mousemove', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, () => { if (myPresence === 'idle') bumpActivity() }, {passive: true}))
 
 const leaveRoom = () => { try { if (room) room.leave() } catch {} }
 window.addEventListener('pagehide', leaveRoom)
 window.addEventListener('beforeunload', leaveRoom)
+window.addEventListener('online', () => setStatus('Reconnecting…'))
+window.addEventListener('offline', () => { statusDot.className = 'dot dot--off'; setStatus('Offline') })
+window.addEventListener('error', e => addSystem('⚠️ ' + (e.message || 'a script error occurred')))
+window.addEventListener('unhandledrejection', e => addSystem('⚠️ ' + ((e.reason && e.reason.message) || 'an async error occurred')))
+
+/* ------------------------------------------------------------------ *
+ * Name handling
+ * ------------------------------------------------------------------ */
+function setMyName(n) {
+  myName = sanitize(n, CONFIG.maxNameLen).trim()
+  meName.textContent = myName
+  meDot.style.background = colorOf(selfId)
+  try { localStorage.setItem('c2c-name', myName) } catch {}
+  renderRoster()
+}
+const ADJ = ['Quiet', 'Brave', 'Lunar', 'Swift', 'Vivid', 'Mellow', 'Cosmic', 'Crimson', 'Golden', 'Hidden', 'Wild', 'Calm']
+const ANI = ['Otter', 'Fox', 'Heron', 'Lynx', 'Raven', 'Moth', 'Koi', 'Wren', 'Ibex', 'Falcon', 'Comet', 'Maple']
+const surprise = () => ADJ[Math.floor(Math.random() * ADJ.length)] + ANI[Math.floor(Math.random() * ANI.length)]
 
 /* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
 function boot() {
-  buildEmoji()
+  applyTheme(); applyBlur()
+  nickInput.maxLength = CONFIG.maxNameLen
+  inputEl.maxLength = CONFIG.maxMsgLen
+  buildEmoji('')
   updateSendBtn()
+  emptyBtn.addEventListener('click', () => copyText(shareUrl(), emptyBtn, '🔗 Copy invite link'))
+
+  // room chip + gate room label
+  if (CONFIG.isDefaultRoom) { roomChip.hidden = true; gateRoomLabel.textContent = 'the public room' }
+  else { roomChipName.textContent = '#' + CONFIG.roomCode; roomChip.hidden = false; gateRoomLabel.textContent = 'private room #' + CONFIG.roomCode; gatePassWrap.hidden = false }
+
+  // prefilled password (set when navigating from "new room")
+  try { const p = sessionStorage.getItem('c2c-pass-' + CONFIG.roomCode); if (p) { myPass = p; gatePass.value = p } } catch {}
+
   let saved = ''
   try { saved = localStorage.getItem('c2c-name') || '' } catch {}
   if (saved) nickInput.value = saved
+  const refreshAvatar = () => {
+    const n = nickInput.value.trim()
+    gateAvatar.style.background = colorOf(selfId)
+    gateAvatar.textContent = initialOf(n || '?')
+  }
+  refreshAvatar()
+  nickInput.addEventListener('input', refreshAvatar)
+  surpriseBtn.addEventListener('click', () => { nickInput.value = surprise(); refreshAvatar(); nickInput.focus() })
   nickInput.focus()
 
   gateForm.addEventListener('submit', e => {
     e.preventDefault()
-    const name = clampStr(nickInput.value, CONFIG.maxNameLen).trim()
-    if (!name) { nickInput.focus(); return }
-    myName = name
-    meName.textContent = myName
-    meDot.style.background = colorOf(selfId)
-    try { localStorage.setItem('c2c-name', myName) } catch {}
-
-    gate.hidden = true
-    app.hidden = false
-    inputEl.focus()
-    addSystem(`You joined "${CONFIG.roomId}". Messages are live & peer-to-peer — say hi 👋`)
-    renderRoster()
-    startChat()
+    const n = sanitize(nickInput.value, CONFIG.maxNameLen).trim()
+    if (!n) { nickInput.focus(); return }
+    setMyName(n)
+    if (!CONFIG.isDefaultRoom) myPass = gatePass.value.trim()
+    gate.hidden = true; app.hidden = false; inputEl.focus()
+    renderRoster(); refreshEmpty(); bumpActivity(); startChat()
   })
 }
 

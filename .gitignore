@@ -12,3 +12,8 @@ node_modules/
 # local test artifacts / screenshots
 screenshot-*.png
 *.log
+
+# stray npm artifacts (tests run from /tmp, not here)
+package.json
+package-lock.json
+node_modules/

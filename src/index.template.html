@@ -1,27 +1,38 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
   <meta charset="UTF-8" />
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss: https:; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
-  <meta name="color-scheme" content="dark" />
+  <meta name="color-scheme" content="dark light" />
   <title>Global Free Speech · live p2p chat</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
   <!--INLINE_STYLE-->
 </head>
 <body>
+  <a class="skip" href="#input">Skip to message box</a>
+
   <!-- Nickname gate -->
   <div id="gate" class="gate">
     <form id="gate-form" class="gate-card" autocomplete="off">
       <div class="gate-logo">💬</div>
       <h1 class="gate-title">Global Free Speech</h1>
-      <p class="gate-sub">Live, anonymous, peer&#8209;to&#8209;peer chat. No accounts, no servers, no history — whoever is here right now can talk.</p>
+      <p class="gate-sub">Live, anonymous, peer&#8209;to&#8209;peer chat. No accounts, no servers, no history — whoever is in <span id="gate-room">the public room</span> right now can talk.</p>
+      <div class="gate-id"><span id="gate-avatar" class="gate-avatar" aria-hidden="true">?</span></div>
       <label class="gate-label" for="nick">Pick a name to join</label>
-      <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" spellcheck="false" required />
+      <div class="gate-row">
+        <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" spellcheck="false" required />
+        <button id="surprise" class="gate-dice" type="button" title="Surprise me">🎲</button>
+      </div>
+      <div id="gate-pass-wrap" class="gate-passwrap" hidden>
+        <label class="gate-label" for="gate-pass">Room password (optional — must match other people in this room)</label>
+        <input id="gate-pass" class="gate-input" type="password" maxlength="64" placeholder="leave blank if none" autocomplete="off" />
+      </div>
       <button id="gate-go" class="gate-btn" type="submit">Join the chat →</button>
-      <p class="gate-foot">Messages travel directly between browsers, end&#8209;to&#8209;end encrypted, and vanish when everyone leaves.</p>
+      <p class="gate-trio"><span>🔒 end&#8209;to&#8209;end encrypted</span><span>🚫 no servers</span><span>💨 vanishes</span></p>
+      <p class="gate-foot">Heads up: chat is direct device&#8209;to&#8209;device, so other people in the room may be able to see your IP address. Use a VPN/Tor if you need anonymity.</p>
     </form>
   </div>
 
@@ -29,42 +40,71 @@
   <div id="app" class="app" hidden>
     <header class="topbar">
       <div class="tb-left">
-        <button id="rules-toggle" class="iconpill mobile-only" type="button" aria-label="Community guidelines" aria-expanded="false">📜</button>
+        <button id="rules-toggle" class="iconpill mobile-only" type="button" aria-label="Guidelines & settings" aria-expanded="false">📜</button>
         <span class="brand"><span class="brand-mark">💬</span><span class="brand-name">chat&#8209;to&#8209;chat</span></span>
+        <button id="room-chip" class="roomchip" type="button" title="You're in a private room" hidden><span class="rc-hash">#</span><span id="room-chip-name"></span></button>
       </div>
       <div class="tb-center"><h1 class="headline">Global Free Speech</h1></div>
       <div class="tb-right">
-        <span class="status" title="Connection status"><span id="status-dot" class="dot dot--off"></span><span id="status-text" class="status-text">Connecting…</span></span>
+        <div class="pop-wrap">
+          <button id="status" class="status" type="button" title="Connection details"><span id="status-dot" class="dot dot--off"></span><span id="status-text" class="status-text">Connecting…</span></button>
+          <div id="status-panel" class="pop status-panel" hidden></div>
+        </div>
+        <div class="pop-wrap">
+          <button id="share-btn" class="iconpill" type="button" aria-label="Share this room">🔗</button>
+          <div id="share" class="pop share-panel" hidden>
+            <div class="pop-h">Invite people</div>
+            <p class="share-note">Anyone with the link or code joins this exact room — no account, no server.</p>
+            <div class="share-code" id="share-code"></div>
+            <div class="share-btns">
+              <button id="share-copy-link" class="share-b" type="button">🔗 Copy link</button>
+              <button id="share-copy-code" class="share-b" type="button"># Copy code</button>
+            </div>
+            <button id="share-new" class="share-b share-new" type="button">✨ Start a new private room</button>
+          </div>
+        </div>
         <button id="people-toggle" class="iconpill" type="button" aria-label="Who's online" aria-expanded="false"><span class="ico">👥</span><span id="online-count">1</span></button>
         <span id="me" class="mechip" title="Your name"><span id="me-dot" class="me-dot"></span><span id="me-name">you</span></span>
       </div>
     </header>
 
+    <div id="banner" class="banner" hidden></div>
+
     <div class="body">
-      <!-- LEFT: community guidelines -->
-      <aside id="rules" class="side side--left" aria-label="Community guidelines">
+      <aside id="rules" class="side side--left" aria-label="Community guidelines and settings">
         <div class="side-head"><span>Chat responsibly</span><button id="rules-close" class="side-close" type="button" aria-label="Close">✕</button></div>
         <div class="rules-body">
           <p class="rules-intro">This is an open, anonymous room. Free speech works best when everyone keeps it human.</p>
           <ul class="rules-list">
             <li><span class="r-ico ok">✓</span><span><strong>Be respectful.</strong> Argue ideas, not people — no harassment, hate, or threats.</span></li>
-            <li><span class="r-ico ok">✓</span><span><strong>Keep it honest.</strong> Don't post false or misleading claims as if they were fact.</span></li>
+            <li><span class="r-ico ok">✓</span><span><strong>Keep it honest.</strong> Don't post false or misleading claims as fact.</span></li>
             <li><span class="r-ico ok">✓</span><span><strong>Assume good faith.</strong> You're talking to real strangers — be kind.</span></li>
             <li><span class="r-ico no">✕</span><span><strong>No spam or scams.</strong> Don't flood the room or push links/schemes.</span></li>
             <li><span class="r-ico no">✕</span><span><strong>Nothing illegal.</strong> No doxxing, no content that harms others.</span></li>
           </ul>
-          <p class="rules-note">💨 Messages are <strong>live &amp; peer&#8209;to&#8209;peer</strong> — nothing is stored on any server. But anyone here can still screenshot, so think before you send.</p>
+          <p class="rules-note">💨 Messages are <strong>live &amp; peer&#8209;to&#8209;peer</strong> — nothing is stored on any server. But anyone here can screenshot, and peers may see your IP. Think before you send.</p>
+          <div class="settings">
+            <div class="settings-h">Settings</div>
+            <div class="settings-row">
+              <button id="theme-btn" class="set-btn" type="button" title="Theme">🌗</button>
+              <button id="blur-btn" class="set-btn" type="button" aria-pressed="false" title="Safe view">🫥 Safe view</button>
+            </div>
+          </div>
         </div>
       </aside>
 
-      <!-- CENTER: chat -->
       <main class="chat">
-        <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions" aria-label="Messages"></div>
+        <div id="messages" class="messages" role="log" aria-live="off" aria-label="Messages"></div>
+        <div id="empty" class="empty" hidden>
+          <div class="empty-logo" aria-hidden="true">💬</div>
+          <div id="empty-h" class="empty-h">You’re the first one here</div>
+          <div id="empty-p" class="empty-p">Share the link and whoever opens it can talk — live, peer-to-peer, nothing stored.</div>
+          <button id="empty-btn" class="empty-btn" type="button">🔗 Copy invite link</button>
+        </div>
         <button id="jump" class="jump" type="button" hidden>↓ New messages</button>
         <div id="typing" class="typing" aria-hidden="true" hidden></div>
       </main>
 
-      <!-- RIGHT: who's online -->
       <aside id="people" class="side side--right" aria-label="People online">
         <div class="side-head"><span>Online — <span id="people-count">1</span></span><button id="people-close" class="side-close" type="button" aria-label="Close">✕</button></div>
         <ul id="people-list" class="people-list"></ul>
@@ -73,15 +113,26 @@
       <div id="scrim" class="scrim" hidden></div>
     </div>
 
+    <div id="reply-bar" class="reply-bar" hidden>
+      <span class="rb-ico">↩</span><span id="reply-text" class="rb-text"></span>
+      <button id="reply-cancel" class="rb-x" type="button" aria-label="Cancel reply">✕</button>
+    </div>
+
     <footer class="composer">
-      <div id="emoji" class="emoji-panel" hidden></div>
+      <div id="emoji" class="emoji-panel" hidden>
+        <input id="emoji-search" class="emoji-search" type="text" placeholder="Search emoji…" aria-label="Search emoji" autocomplete="off" />
+        <div id="emoji-grid" class="emoji-grid" role="grid" aria-label="Emoji"></div>
+      </div>
       <button id="emoji-btn" class="icon-btn" type="button" title="Emoji" aria-label="Emoji">😀</button>
-      <input id="input" class="input" type="text" maxlength="4000" placeholder="Say something…" aria-label="Message" autocomplete="off" />
+      <input id="input" class="input" type="text" maxlength="4000" placeholder="Say something…  (/help for commands)" aria-label="Message" autocomplete="off" />
       <button id="send" class="send-btn" type="button" title="Send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"/></svg>
       </button>
     </footer>
   </div>
+
+  <div id="live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <div id="live-sys" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
   <!--INLINE_SCRIPT-->
 </body>
