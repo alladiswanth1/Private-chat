@@ -9,16 +9,23 @@
 
 import {joinRoom, selfId, getRelaySockets} from './vendor/trystero-nostr.bundle.js'
 
+// Any deep URL (e.g. someone typing /README.md or /app.js) is served this same
+// app; silently clean the address bar back to root WITHOUT reloading, so no file
+// and no error are ever shown — the visitor just lands in the chat.
+try {
+  if (location.pathname !== '/' || location.search || location.hash) {
+    history.replaceState(null, '', '/')
+  }
+} catch {}
+
 /* ------------------------------------------------------------------ *
  * Config — safe to edit.
  * ------------------------------------------------------------------ */
 const CONFIG = {
   appId: 'chat-to-chat-p2p-v1',
-  // One room per site (host + path). Different domains/paths isolate automatically.
-  roomId: (() => {
-    const path = location.pathname.replace(/\/[^/]*\.[^/]*$/, '/').replace(/\/+$/, '')
-    return (location.hostname + path) || 'localhost'
-  })(),
+  // One room per host. Every path is served the app and normalized to '/', so
+  // everyone on the domain shares the same single room regardless of URL.
+  roomId: location.hostname || 'localhost',
   turnConfig: [
     // {urls: 'turn:your-turn-host:3478', username: 'user', credential: 'pass'},
   ],

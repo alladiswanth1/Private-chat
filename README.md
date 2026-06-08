@@ -26,63 +26,76 @@ Browser A  ──(encrypted handshake via free public Nostr relays)──  Brows
                          (no server in the middle, nothing stored)
 ```
 
-The Trystero library is **vendored** into `docs/vendor/trystero-nostr.bundle.js` (one self-contained file, no runtime CDN dependency).
+The Trystero library is **vendored** into `src/vendor/trystero-nostr.bundle.js` (one self-contained file, no runtime CDN dependency).
 
 ---
 
 ## Project layout
 
-The site is published from **`docs/`** — only the runtime files live there, so repo
-files like this README are never reachable on the live site.
+Editable sources live in **`src/`** (never published). A tiny build inlines them into a
+single self-contained page in **`docs/`**, which is what GitHub Pages serves — so the
+only thing reachable on the live site is the page itself (the app). No `app.js`,
+`style.css`, or `vendor/` exist as separate URLs to open.
 
 ```
-docs/                            ← the published site (GitHub Pages source)
-  index.html                     app shell + the "pick a name" gate
-  style.css                      dark, responsive UI (3-column desktop, mobile-friendly)
-  app.js                         all the logic (Trystero wiring + history hand-off + UI)
-  404.html                       silently redirects any unknown URL back to the app
-  CNAME                          custom-domain config
-  .nojekyll                      serve files as-is
-  vendor/trystero-nostr.bundle.js  bundled Trystero (Nostr strategy), self-contained
+src/                             ← editable sources (repo-only, NOT served)
+  index.template.html            page markup (gate, 3-column layout, composer)
+  style.css                      dark, responsive UI
+  app.js                         all logic (Trystero wiring + history hand-off + UI)
+  vendor/trystero-nostr.bundle.js  bundled Trystero (Nostr strategy)
+build.mjs                        inlines src/* → docs/index.html (+ docs/404.html)
+docs/                            ← the published site (GitHub Pages source = /docs)
+  index.html                     single self-contained page (CSS + JS all inlined)
+  404.html                       identical copy; any unknown URL serves the app
+  CNAME  .nojekyll               GitHub Pages config (the only other served files)
 README.md  .gitignore            repo-only files (not served)
 ```
 
 ---
 
-## Run it locally
+## Build
 
-ES-module imports and WebRTC need to be served over `http(s)://` — opening `index.html`
-as a `file://` won't work. Serve the **`docs/`** folder:
+After editing anything in `src/`, regenerate the published page:
 
 ```bash
-cd docs && python3 -m http.server 8080
+node build.mjs
+```
+
+This inlines the CSS + JS + vendor bundle into `docs/index.html` and writes an
+identical `docs/404.html`.
+
+## Run it locally
+
+WebRTC needs `http(s)://` — `file://` won't work. Build, then serve `docs/`:
+
+```bash
+node build.mjs && cd docs && python3 -m http.server 8080
 # then open http://localhost:8080
 ```
 
-To see the chat in action locally, open it in **two browser windows/tabs** (or two
-different browsers). They share the `localhost` room and will connect to each other.
+Open it in **two browser windows/tabs** (or two browsers). They share the `localhost`
+room and connect to each other.
 
 ---
 
 ## Deploy to GitHub Pages
 
-1. Create a repo and push these files to it:
+1. Build and push:
 
    ```bash
-   git init
-   git add .
-   git commit -m "chat-to-chat: serverless p2p chat"
-   git branch -M main
-   git remote add origin https://github.com/<you>/<repo>.git
-   git push -u origin main
+   node build.mjs
+   git add . && git commit -m "deploy"
+   git push origin main
    ```
 
 2. On GitHub: **Settings → Pages → Build and deployment → Source: "Deploy from a branch"**, pick **`main`** and the **`/docs`** folder, save.
 
 3. After a minute your site is live at `https://<you>.github.io/<repo>/`.
 
-> Publishing from `/docs` is what keeps `README.md` and other repo files off the live
-> site, and `docs/404.html` makes any unknown URL silently land on the app.
+> Publishing from `/docs` (which contains only the inlined page) is what keeps the
+> sources and `README.md` off the live site; `docs/404.html` makes any unknown URL —
+> including `/README.md`, `/app.js`, etc. — silently land on the app, which cleans the
+> address bar back to `/` with no reload and no error.
 
 ### Custom domain (e.g. `chat-to-chat.com`)
 
@@ -104,7 +117,7 @@ different browsers). They share the `localhost` room and will connect to each ot
 
 Built-in STUN handles most networks. A small share of users behind strict/symmetric
 NATs (some corporate or mobile networks) can't form a direct P2P link. To cover them,
-add a **TURN** relay in `docs/app.js` → `CONFIG.turnConfig`:
+add a **TURN** relay in `src/app.js` → `CONFIG.turnConfig` (then rebuild):
 
 ```js
 turnConfig: [
@@ -120,12 +133,12 @@ through TURN for peers that can't connect directly, and stays end-to-end encrypt
 
 ## Customize
 
-Everything tweakable lives in `CONFIG` at the top of `docs/app.js`:
+Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node build.mjs` after):
 
 | Field        | What it does                                                              |
 |--------------|--------------------------------------------------------------------------|
 | `appId`      | Your app's namespace on the network. **Change it if you fork** this.      |
-| `roomId`     | Defaults to `location.hostname` + path (one room per site).               |
+| `roomId`     | Defaults to `location.hostname` (one room per domain; any path collapses to it). |
 | `historyShare` | How many recent messages a newcomer is handed (default 30).            |
 | `turnConfig` | Optional TURN servers (see above).                                        |
 | `maxNameLen` / `maxMsgLen` | Input length caps.                                          |
