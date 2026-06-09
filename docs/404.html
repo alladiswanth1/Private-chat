@@ -1641,11 +1641,20 @@ function revealApp() {
 async function joinWithNameCheck() {
   startChat()
   if (!room) { revealApp(); return true }   // connection failed → let them in to see the error
+  // Block instantly on a clash. Otherwise decide "free" as soon as we're confident:
+  // connected peers are all named & clean, or relays are up with no peers after a
+  // grace (empty room). Hard cap accounts for slow public-relay discovery; anything
+  // that slips past is caught by the live auto-rename fallback.
   const taken = await new Promise(resolve => {
     const t0 = Date.now()
     const iv = setInterval(() => {
-      if (nameTakenByPeer(myName)) { clearInterval(iv); resolve(true) }
-      else if (Date.now() - t0 > 2500) { clearInterval(iv); resolve(false) }
+      if (nameTakenByPeer(myName)) { clearInterval(iv); resolve(true); return }   // clash → block
+      const el = Date.now() - t0
+      const relays = relayStates().filter(s => s.open).length
+      // empty room: relays up but nobody connected after a grace → free, fast.
+      // Otherwise wait a fixed window (don't early-exit on partial discovery, or a
+      // peer still connecting could be missed); slow-tail slips are auto-renamed.
+      if ((relays > 0 && peers.size === 0 && el > 2500) || el > 5000) { clearInterval(iv); resolve(false) }
     }, 150)
   })
   if (taken) { leaveAndReset(); renderRoster(); renderTimeline(); return false }
