@@ -74,6 +74,7 @@ const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
 const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
 const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
+const renameModal = $('#rename'), renameForm = $('#rename-form'), renameMsg = $('#rename-msg'), renameInput = $('#rename-input'), renameErr = $('#rename-err')
 
 /* ------------------------------------------------------------------ *
  * State
@@ -153,25 +154,45 @@ function nameTakenByPeer(name) {
   for (const p of peers.values()) if (p.name && sameName(p.name, name)) return true
   return false
 }
-// pick "base2", "base3", … not currently in use (for the race fallback)
-function freeNameVariant(name) {
-  const base = (name.replace(/\d+$/, '') || 'guest').slice(0, CONFIG.maxNameLen - 3) || 'guest'
-  for (let n = 2; n < 999; n++) { const c = base + n; if (!nameTakenByPeer(c) && !sameName(c, myName)) return c }
-  return base + (Math.floor(Math.random() * 9000) + 1000)
-}
-// Deterministic race fallback: if a present peer shares my name, the peer with the
-// HIGHER selfId yields (renames itself) — both sides agree, so exactly one moves.
+// Deterministic: if a present peer shares my name, the HIGHER selfId yields. Rather
+// than auto-renaming, the loser is FORCED to pick a new name via a blocking modal.
+let renaming = false
 function checkMyNameCollision() {
   if (!entered || !myName) return
-  for (const [id, p] of peers) {
-    if (p.name && sameName(p.name, myName) && selfId > id) {
-      const old = myName
-      setMyName(freeNameVariant(myName))
-      if (actions) actions.name.send(myName)
-      addSystem(`"${old}" was already taken — you're now "${myName}"`)
-      return
-    }
-  }
+  let clash = false
+  for (const [id, p] of peers) { if (p.name && sameName(p.name, myName) && selfId > id) { clash = true; break } }
+  if (clash) openRenameModal()
+  else maybeCloseRename()   // clash cleared (peer left/renamed) → release the modal
+}
+function setComposerEnabled(on) {
+  inputEl.disabled = !on; emojiBtn.disabled = !on
+  sendBtn.disabled = !on || !inputEl.value.trim()
+}
+function openRenameModal() {
+  if (renaming) return
+  renaming = true
+  renameMsg.textContent = `The name "${myName}" is already taken in this room. Choose a different name to keep chatting.`
+  renameInput.value = ''; renameErr.hidden = true
+  renameModal.hidden = false
+  setComposerEnabled(false)
+  setTimeout(() => renameInput.focus(), 0)
+}
+function closeRenameModal() {
+  renaming = false
+  renameModal.hidden = true
+  setComposerEnabled(true); updateSendBtn(); inputEl.focus()
+}
+function maybeCloseRename() {
+  if (renaming && !nameTakenByPeer(myName)) { addSystem(`The name clash cleared — you kept "${myName}".`); closeRenameModal() }
+}
+function doRename() {
+  const n = sanitize(renameInput.value, CONFIG.maxNameLen).trim()
+  if (!n) { renameErr.textContent = 'Please enter a name.'; renameErr.hidden = false; return }
+  if (nameTakenByPeer(n)) { renameErr.textContent = `"${n}" is also taken — try another.`; renameErr.hidden = false; return }
+  const old = myName
+  setMyName(n); if (actions) actions.name.send(myName)
+  addSystem(`You renamed from "${old}" to "${myName}".`)
+  closeRenameModal()
 }
 // names are unauthenticated → still visually flag if two VISIBLE peers share one
 function nameIsDuplicated(peerId, name) {
@@ -662,6 +683,7 @@ function wireRoom(room) {
     clearPeerTyping(peerId); histAcceptedFrom.delete(peerId)
     for (const ch in CONFIG.flood) floodState.delete(peerId + ':' + ch)   // clear all channels
     renderRoster()
+    maybeCloseRename()   // if the peer we clashed with left, release the rename modal
     if (existed && !isMuted(peerId)) addPresenceSys(`${left} left`)
     if (!timeline.some(e => e.kind === 'msg')) refreshEmpty()
   }
@@ -795,6 +817,7 @@ function toggleMute(peerId) {
  * Sending + slash commands
  * ------------------------------------------------------------------ */
 function sendMessage() {
+  if (renaming) return                 // must resolve a forced rename first
   const raw = inputEl.value
   const text = sanitize(raw, CONFIG.maxMsgLen).trim()
   if (!text || !actions) return
@@ -1107,6 +1130,7 @@ inputEl.addEventListener('keydown', e => {
   else if (e.key === 'Escape' && replyTo) cancelReply()
 })
 replyCancel.addEventListener('click', cancelReply)
+renameForm.addEventListener('submit', e => { e.preventDefault(); doRename() })
 
 emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPanel.hidden = !emojiPanel.hidden; if (!emojiPanel.hidden) { emojiSearch.value = ''; buildEmoji(''); emojiSearch.focus() } })
 emojiSearch.addEventListener('input', () => buildEmoji(emojiSearch.value))

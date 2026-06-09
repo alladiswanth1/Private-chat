@@ -134,6 +134,17 @@
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"/></svg>
       </button>
     </footer>
+
+    <!-- forced-rename modal: shown when this peer's name clashes after joining -->
+    <div id="rename" class="renamemodal" hidden>
+      <form id="rename-form" class="renamecard">
+        <div class="rename-h">⚠ Name already taken</div>
+        <p id="rename-msg" class="rename-msg"></p>
+        <input id="rename-input" class="gate-input" type="text" maxlength="24" placeholder="choose a different name" autocomplete="off" spellcheck="false" />
+        <p id="rename-err" class="rename-err" role="alert" hidden></p>
+        <button id="rename-go" class="gate-btn" type="submit">Use this name</button>
+      </form>
+    </div>
   </div>
 
   <div id="live" class="sr-only" aria-live="polite" aria-atomic="true"></div>

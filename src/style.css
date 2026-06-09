@@ -73,6 +73,16 @@ button { font-family: inherit; color: inherit; }
 .gate-err { margin: 12px 0 0; color: var(--danger); font-size: 13px; font-weight: 600; }
 .gate-err[hidden] { display: none; }
 
+/* forced-rename modal */
+.renamemodal { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: rgba(5,8,14,.66); backdrop-filter: blur(6px); }
+.renamemodal[hidden] { display: none; }
+.renamecard { width: min(380px,100%); background: linear-gradient(180deg,var(--panel-2),var(--panel)); border: 1px solid var(--line); border-radius: 18px; padding: 24px; box-shadow: var(--shadow); text-align: center; animation: rise .25s ease; }
+.rename-h { font-size: 18px; font-weight: 800; color: var(--danger); margin-bottom: 8px; }
+.rename-msg { color: var(--txt-dim); font-size: 14px; line-height: 1.5; margin: 0 0 14px; }
+.rename-err { color: var(--danger); font-size: 13px; font-weight: 600; margin: 10px 0 0; }
+.rename-err[hidden] { display: none; }
+.renamecard .gate-btn { margin-top: 12px; }
+
 /* ===================== app shell ===================== */
 .app { display: flex; flex-direction: column; height: 100dvh; }
 .app[hidden] { display: none; }

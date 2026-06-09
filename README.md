@@ -170,9 +170,10 @@ database.
 - **Emoji reactions**, **reply / quote**, **slash commands** (`/nick /me /who /clear
   /help /shrug`), and a searchable **emoji picker** with recents.
 - **Unique display names per room** — case-insensitive; a taken name is blocked at the
-  join screen (and `/nick` refuses it), with a deterministic auto-rename fallback for the
-  rare simultaneous-join race. Best-effort (no server; deliberate spoofing still shows the
-  `#id` fingerprint badge).
+  join screen (and `/nick` refuses it). If a duplicate ever slips through (a rare race),
+  the later peer gets a **forced-rename popup** and must pick a free name to keep
+  chatting — no silent auto-numbering. Best-effort (no server; deliberate spoofing still
+  shows the `#id` fingerprint badge).
 - **Per-user mute** (session-only), **idle/away presence**,
   **typing indicators**, **timestamps + time-gap dividers**, and a **scroll-to-latest** /
   **unread tab badge**.
