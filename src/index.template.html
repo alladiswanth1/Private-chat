@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss: https:; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss: https:; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />
@@ -129,6 +129,8 @@
         <div id="emoji-grid" class="emoji-grid" role="grid" aria-label="Emoji"></div>
       </div>
       <button id="emoji-btn" class="icon-btn" type="button" title="Emoji" aria-label="Emoji">😀</button>
+      <button id="attach-btn" class="icon-btn" type="button" title="Send a file or image" aria-label="Attach a file">📎</button>
+      <input id="file-input" type="file" hidden aria-hidden="true" />
       <input id="input" class="input" type="text" maxlength="4000" placeholder="Say something…  (/help for commands)" aria-label="Message" autocomplete="off" />
       <button id="send" class="send-btn" type="button" title="Send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"/></svg>

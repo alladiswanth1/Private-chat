@@ -145,6 +145,7 @@ Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node bui
 | `flood`      | Per-channel inbound rate limits (msg/name/typing/react/presence).          |
 | `turnConfig` | Optional TURN servers (see above).                                        |
 | `maxNameLen` / `maxMsgLen` | Input length caps.                                          |
+| `maxFileBytes` | Largest file/image a peer may send (default 10 MB).                     |
 
 **Rooms & sharing:** the default room is the whole domain (public). Click the **Rooms**
 button (top-right) to **create or join a private room by name** — pick any name/number
@@ -167,6 +168,12 @@ database.
   reactions) by the single elected peer already in the room.
 - **Private rooms by custom name + required password** (`#r=<name>`, cryptographically gated), and an
   overflow-room suggestion when a mesh gets large.
+- **Peer-to-peer file & image sharing** — attach (📎), drag-and-drop onto the chat, or
+  paste an image; it streams **directly browser-to-browser over the encrypted WebRTC
+  channel** (chunked, with a live progress bar), never through any server. Images render
+  inline; other files arrive as a download card. Up to 10 MB; **live-only** (not stored,
+  not part of the history hand-off) and the in-memory blob is freed when it scrolls off,
+  on `/clear`, or when you leave.
 - **Emoji reactions**, **reply / quote**, **slash commands** (`/nick /me /who /clear
   /help /shrug`), and a searchable **emoji picker** with recents.
 - **Unique display names per room** — case-insensitive; a taken name is blocked at the

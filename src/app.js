@@ -46,13 +46,14 @@ const CONFIG = {
   turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
   maxNameLen: 24,
   maxMsgLen: 4000,
+  maxFileBytes: 10 * 1024 * 1024,   // 10 MB cap per file (sent P2P, never stored)
   maxRendered: 400,
   historyShare: 30,
   meshCap: 12,
   idleMs: 60000,
   gapDividerMs: 5 * 60 * 1000,
   // per-channel inbound flood budgets (count within window ms)
-  flood: { msg: [20, 2000], name: [6, 4000], typing: [40, 2000], react: [40, 2000], presence: [20, 4000] },
+  flood: { msg: [20, 2000], name: [6, 4000], typing: [40, 2000], react: [40, 2000], presence: [20, 4000], file: [6, 12000] },
 }
 
 /* ------------------------------------------------------------------ *
@@ -63,6 +64,7 @@ const gate = $('#gate'), gateForm = $('#gate-form'), nickInput = $('#nick'), sur
 const gateAvatar = $('#gate-avatar'), gatePass = $('#gate-pass'), gatePassWrap = $('#gate-pass-wrap'), gateRoomLabel = $('#gate-room')
 const app = $('#app'), messagesEl = $('#messages'), typingEl = $('#typing'), jumpBtn = $('#jump'), bannerEl = $('#banner')
 const inputEl = $('#input'), sendBtn = $('#send'), emojiBtn = $('#emoji-btn'), emojiPanel = $('#emoji'), emojiSearch = $('#emoji-search'), emojiGrid = $('#emoji-grid')
+const attachBtn = $('#attach-btn'), fileInput = $('#file-input'), chatEl = document.querySelector('.chat')
 const replyBar = $('#reply-bar'), replyText = $('#reply-text'), replyCancel = $('#reply-cancel')
 const statusBtn = $('#status'), statusDot = $('#status-dot'), statusText = $('#status-text'), statusPanel = $('#status-panel')
 const onlineCountEl = $('#online-count'), peopleEl = $('#people'), peopleListEl = $('#people-list'), peopleCountEl = $('#people-count')
@@ -165,7 +167,7 @@ function checkMyNameCollision() {
   else maybeCloseRename()   // clash cleared (peer left/renamed) → release the modal
 }
 function setComposerEnabled(on) {
-  inputEl.disabled = !on; emojiBtn.disabled = !on
+  inputEl.disabled = !on; emojiBtn.disabled = !on; attachBtn.disabled = !on
   sendBtn.disabled = !on || !inputEl.value.trim()
 }
 function openRenameModal() {
@@ -218,6 +220,7 @@ function addEntry(entry) {
     const r = timeline.shift()
     evicted = true
     if (r.kind === 'msg') reactions.delete(r.id)
+    if (r.kind === 'file' && r.url) URL.revokeObjectURL(r.url)   // free the blob (ephemeral)
     // Do NOT delete r.id from seenIds — keeping dedup stable stops an evicted
     // message being re-inserted as a duplicate by a late history burst.
   }
@@ -227,7 +230,7 @@ function addEntry(entry) {
 }
 
 function visibleEntries() {
-  return timeline.filter(e => e.kind !== 'msg' || !isMuted(e.peerId))
+  return timeline.filter(e => e.kind === 'sys' || !isMuted(e.peerId))   // mute hides msg + file
 }
 
 function renderTimeline({stick} = {}) {
@@ -238,7 +241,8 @@ function renderTimeline({stick} = {}) {
   for (const e of visibleEntries()) {
     if (e.kind === 'sys') { frag.appendChild(sysNode(e.text)); last = null; lastT = e.t; continue }
     if (lastT && e.t - lastT > CONFIG.gapDividerMs) { frag.appendChild(sysNode(timeLabel(e.t))); last = null }
-    frag.appendChild(msgNode(e, last === e.peerId && !e.emote))
+    const grouped = last === e.peerId && !e.emote
+    frag.appendChild(e.kind === 'file' ? fileNode(e, grouped) : msgNode(e, grouped))
     last = e.emote ? null : e.peerId; lastT = e.t
   }
   messagesEl.replaceChildren(frag)
@@ -541,6 +545,95 @@ jumpBtn.addEventListener('click', () => { messagesEl.scrollTop = messagesEl.scro
 messagesEl.addEventListener('scroll', () => { if (isNearBottom()) hideJump() })
 
 /* ------------------------------------------------------------------ *
+ * Files & images — peer-to-peer, ephemeral (Trystero binary transfer)
+ * Bytes flow browser↔browser over the encrypted data channel; never a server.
+ * ------------------------------------------------------------------ */
+// svg excluded from inline <img> preview out of caution → shown as a download card
+const isImageType = t => typeof t === 'string' && t.startsWith('image/') && t !== 'image/svg+xml'
+function fmtBytes(n) {
+  if (!(n > 0)) return ''
+  const u = ['B', 'KB', 'MB', 'GB']; let i = 0
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
+  return (i ? n.toFixed(1) : n) + ' ' + u[i]
+}
+const findEntry = key => timeline.find(x => x.id === key)
+
+function fileNode(e, grouped) {
+  const self = e.peerId === selfId
+  const row = document.createElement('div')
+  row.className = 'msg' + (self ? ' me' : '') + (grouped ? ' cont' : '')
+  row.dataset.key = e.id
+  const avatar = document.createElement('div')
+  avatar.className = 'avatar'; avatar.style.background = colorOf(e.peerId); avatar.textContent = initialOf(e.name)
+  const stack = document.createElement('div'); stack.className = 'stack'
+  const meta = document.createElement('div'); meta.className = 'meta'
+  const who = document.createElement('span'); who.className = 'who'; who.style.color = self ? '' : colorOf(e.peerId); who.textContent = self ? 'You' : e.name
+  const time = document.createElement('span'); time.className = 'time'; time.textContent = fmtTime(e.t)
+  meta.append(who, time); stack.appendChild(meta)
+  const bubble = document.createElement('div'); bubble.className = 'bubble file'
+  if (!e.url) {                                   // still transferring
+    const note = document.createElement('div'); note.className = 'filenote'
+    note.textContent = (self ? 'Sending ' : 'Receiving ') + (e.fileName || 'file') + '…'
+    const prog = document.createElement('div'); prog.className = 'fileprog'
+    const bar = document.createElement('i'); bar.style.width = Math.round((e.progress || 0) * 100) + '%'; prog.appendChild(bar)
+    bubble.append(note, prog)
+  } else if (isImageType(e.fileType)) {           // inline image
+    const img = document.createElement('img'); img.className = 'filemsg-img'; img.src = e.url; img.alt = e.fileName || 'image'; img.loading = 'lazy'
+    img.addEventListener('click', () => window.open(e.url, '_blank', 'noopener'))
+    bubble.appendChild(img)
+  } else {                                         // download card
+    const card = document.createElement('div'); card.className = 'filecard'
+    const ic = document.createElement('span'); ic.className = 'fi'; ic.textContent = '📄'
+    const fm = document.createElement('div'); fm.className = 'fmeta'
+    const fn = document.createElement('span'); fn.className = 'fname'; fn.textContent = e.fileName || 'file'
+    const fs = document.createElement('span'); fs.className = 'fsize'; fs.textContent = fmtBytes(e.fileSize)
+    fm.append(fn, fs)
+    const dl = document.createElement('a'); dl.className = 'fdl'; dl.href = e.url; dl.download = e.fileName || 'file'; dl.textContent = '⬇'; dl.title = 'Download'
+    card.append(ic, fm, dl); bubble.appendChild(card)
+  }
+  stack.appendChild(bubble); row.append(avatar, stack)
+  return row
+}
+
+function addFileEntry(entry, fromSelf) {
+  const stick = fromSelf || isNearBottom()
+  if (!seenIds.has(entry.id)) addEntry(entry)
+  renderTimeline({stick})
+}
+function onFileProgress(pct, peerId, metadata) {
+  if (!metadata || typeof metadata.id !== 'string' || isMuted(peerId)) return
+  if (typeof metadata.size === 'number' && metadata.size > CONFIG.maxFileBytes) return
+  const key = keyOf(peerId, clampStr(metadata.id, 64))
+  const e = findEntry(key)
+  if (e) { e.progress = pct }
+  else addEntry({kind: 'file', id: key, t: validT(metadata.t), peerId, name: nameOf(peerId), fileName: sanitize(metadata.name, 120) || 'file', fileType: clampStr(metadata.type, 80), fileSize: typeof metadata.size === 'number' ? metadata.size : 0, url: null, progress: pct})
+  renderTimeline({})
+}
+function onFileComplete(data, peerId, metadata) {
+  if (!metadata || typeof metadata.id !== 'string' || !allow(peerId, 'file') || isMuted(peerId)) return
+  const size = typeof metadata.size === 'number' ? metadata.size : (data && data.byteLength) || 0
+  if (size > CONFIG.maxFileBytes) return
+  const key = keyOf(peerId, clampStr(metadata.id, 64))
+  const url = URL.createObjectURL(new Blob([data], {type: isImageType(metadata.type) ? metadata.type : 'application/octet-stream'}))
+  const e = findEntry(key)
+  if (e) { e.url = url; e.progress = 1; renderTimeline({stick: isNearBottom()}) }
+  else addFileEntry({kind: 'file', id: key, t: validT(metadata.t), peerId, name: nameOf(peerId), fileName: sanitize(metadata.name, 120) || 'file', fileType: clampStr(metadata.type, 80), fileSize: size, url, progress: 1}, false)
+  announceMsg(`${nameOf(peerId)} sent ${isImageType(metadata.type) ? 'an image' : 'a file'}`)
+  if (document.hidden) setUnread(unread + 1)
+}
+function sendFile(file) {
+  if (!file || !actions) return
+  if (file.size > CONFIG.maxFileBytes) { addSystem(`That file is too big (max ${fmtBytes(CONFIG.maxFileBytes)}).`); return }
+  if (file.size === 0) { addSystem('That file is empty.'); return }
+  const rawId = newRawId()
+  const meta = {id: rawId, name: clampStr(file.name, 120) || 'file', type: clampStr(file.type, 80), size: file.size, t: Date.now()}
+  // my own copy renders instantly (I already hold the bytes)
+  addFileEntry({kind: 'file', id: keyOf(selfId, rawId), t: meta.t, peerId: selfId, name: myName, fileName: meta.name, fileType: meta.type, fileSize: meta.size, url: URL.createObjectURL(file), progress: 1}, true)
+  try { actions.file.send(file, {metadata: meta}) } catch { addSystem('Could not send the file.') }
+}
+function revokeAllFileUrls() { for (const e of timeline) if (e.kind === 'file' && e.url) URL.revokeObjectURL(e.url) }
+
+/* ------------------------------------------------------------------ *
  * Networking
  * ------------------------------------------------------------------ */
 function startChat() {
@@ -581,6 +674,7 @@ function leaveAndReset() {
   if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
   for (const t of typingTimers.values()) clearTimeout(t)
   typingTimers.clear(); peers.clear(); floodState.clear(); histAcceptedFrom.clear()
+  revokeAllFileUrls()
   reactions.clear(); seenIds.clear(); timeline.length = 0
   prevRelays = 0; noPeerSince = 0
 }
@@ -603,7 +697,8 @@ function wireRoom(room) {
   const histReq = room.makeAction('histreq')
   const react = room.makeAction('react')
   const presence = room.makeAction('presence')
-  actions = {msg, name, typing, hist, histReq, react, presence}
+  const file = room.makeAction('file')
+  actions = {msg, name, typing, hist, histReq, react, presence, file}
 
   msg.onMessage = (data, {peerId}) => {
     if (!data || typeof data.id !== 'string' || !allow(peerId, 'msg')) return
@@ -667,6 +762,8 @@ function wireRoom(room) {
     if (!seenIds.has(d.target)) return       // ignore reactions to messages we don't have
     applyReaction(d.target, sanitize(d.emoji, 8), peerId, !!d.on)
   }
+  file.onMessage = (data, {peerId, metadata}) => onFileComplete(data, peerId, metadata)
+  file.onReceiveProgress = (pct, {peerId, metadata}) => onFileProgress(pct, peerId, metadata)
 
   room.onPeerJoin = peerId => {
     if (!peers.has(peerId)) peers.set(peerId, {name: null, presence: 'active'})
@@ -848,7 +945,7 @@ function handleSlash(text) {
       return true
     }
     case 'who': addSystem('Here now: ' + [myName + ' (you)', ...[...peers.values()].map(p => p.name).filter(Boolean)].join(', ')); return true
-    case 'clear': timeline.length = 0; seenIds.clear(); reactions.clear(); renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
+    case 'clear': revokeAllFileUrls(); timeline.length = 0; seenIds.clear(); reactions.clear(); renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
     case 'shrug': inputEl.value = '¯\\_(ツ)_/¯'; sendMessage(); return true
     case 'help': addSystem('Commands: /nick <name> · /me <action> · /who · /clear · /shrug · /help'); return true
     default: addSystem(`Unknown command: /${cmd} — try /help`); return true
@@ -1135,6 +1232,28 @@ renameForm.addEventListener('submit', e => { e.preventDefault(); doRename() })
 emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPanel.hidden = !emojiPanel.hidden; if (!emojiPanel.hidden) { emojiSearch.value = ''; buildEmoji(''); emojiSearch.focus() } })
 emojiSearch.addEventListener('input', () => buildEmoji(emojiSearch.value))
 document.addEventListener('click', e => { if (!emojiPanel.hidden && !emojiPanel.contains(e.target) && e.target !== emojiBtn) emojiPanel.hidden = true })
+
+// --- attach / drag-drop / paste files ---
+attachBtn.addEventListener('click', () => { if (!attachBtn.disabled) fileInput.click() })
+fileInput.addEventListener('change', () => { const f = fileInput.files && fileInput.files[0]; if (f) sendFile(f); fileInput.value = '' })
+let dragDepth = 0
+chatEl.addEventListener('dragenter', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); dragDepth++; chatEl.classList.add('dragover') } })
+chatEl.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } })
+chatEl.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; chatEl.classList.remove('dragover') } })
+chatEl.addEventListener('drop', e => {
+  if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return
+  e.preventDefault(); dragDepth = 0; chatEl.classList.remove('dragover')
+  if (!entered) return
+  for (const f of e.dataTransfer.files) sendFile(f)
+})
+inputEl.addEventListener('paste', e => {
+  const items = e.clipboardData && e.clipboardData.files
+  if (!items || !items.length || !entered) return
+  // only intercept when an actual file (e.g. pasted image) is on the clipboard
+  let sent = false
+  for (const f of items) { sendFile(f); sent = true }
+  if (sent) e.preventDefault()
+})
 
 statusBtn.addEventListener('click', e => { e.stopPropagation(); toggleStatusPanel() })
 document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) statusPanel.hidden = true })
