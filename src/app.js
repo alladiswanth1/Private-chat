@@ -59,7 +59,7 @@ const CONFIG = {
  * DOM
  * ------------------------------------------------------------------ */
 const $ = s => document.querySelector(s)
-const gate = $('#gate'), gateForm = $('#gate-form'), nickInput = $('#nick'), surpriseBtn = $('#surprise')
+const gate = $('#gate'), gateForm = $('#gate-form'), nickInput = $('#nick'), surpriseBtn = $('#surprise'), gateErr = $('#gate-err'), gateGo = $('#gate-go')
 const gateAvatar = $('#gate-avatar'), gatePass = $('#gate-pass'), gatePassWrap = $('#gate-pass-wrap'), gateRoomLabel = $('#gate-room')
 const app = $('#app'), messagesEl = $('#messages'), typingEl = $('#typing'), jumpBtn = $('#jump'), bannerEl = $('#banner')
 const inputEl = $('#input'), sendBtn = $('#send'), emojiBtn = $('#emoji-btn'), emojiPanel = $('#emoji'), emojiSearch = $('#emoji-search'), emojiGrid = $('#emoji-grid')
@@ -96,6 +96,7 @@ let unread = 0
 let replyTo = null                 // {key, name, snippet}
 let pendingSys = []                // batched join/leave/rename lines
 let pendingSysTimer = null
+let entered = false                // true once past the join-screen name check
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -145,12 +146,38 @@ const newRawId = () => Date.now().toString(36) + '-' + (seq++).toString(36)
 const isNearBottom = () => messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 120
 const isMuted = peerId => muted.has(peerId)
 
-// names are unauthenticated → flag when two VISIBLE peers share one
+// Case-insensitive, trimmed equality — display names must be unique per room.
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+// is `name` already used by a currently-present peer?
+function nameTakenByPeer(name) {
+  for (const p of peers.values()) if (p.name && sameName(p.name, name)) return true
+  return false
+}
+// pick "base2", "base3", … not currently in use (for the race fallback)
+function freeNameVariant(name) {
+  const base = (name.replace(/\d+$/, '') || 'guest').slice(0, CONFIG.maxNameLen - 3) || 'guest'
+  for (let n = 2; n < 999; n++) { const c = base + n; if (!nameTakenByPeer(c) && !sameName(c, myName)) return c }
+  return base + (Math.floor(Math.random() * 9000) + 1000)
+}
+// Deterministic race fallback: if a present peer shares my name, the peer with the
+// HIGHER selfId yields (renames itself) — both sides agree, so exactly one moves.
+function checkMyNameCollision() {
+  if (!entered || !myName) return
+  for (const [id, p] of peers) {
+    if (p.name && sameName(p.name, myName) && selfId > id) {
+      const old = myName
+      setMyName(freeNameVariant(myName))
+      if (actions) actions.name.send(myName)
+      addSystem(`"${old}" was already taken — you're now "${myName}"`)
+      return
+    }
+  }
+}
+// names are unauthenticated → still visually flag if two VISIBLE peers share one
 function nameIsDuplicated(peerId, name) {
   if (!name) return false
-  let n = 0
-  if (myName === name) n++
-  for (const [id, p] of peers) { if (!isMuted(id) && p.name === name) n++ }
+  let n = sameName(myName, name) ? 1 : 0
+  for (const [id, p] of peers) { if (!isMuted(id) && sameName(p.name, name)) n++ }
   return n > 1
 }
 
@@ -525,6 +552,18 @@ function reconnect() {
   startChat()
 }
 
+// Leave the room and wipe ALL state (incl. the timeline) — used when a join is
+// rejected for a duplicate name so the next attempt starts completely fresh.
+function leaveAndReset() {
+  try { if (room) room.leave() } catch {}
+  room = null; actions = null; entered = false
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+  for (const t of typingTimers.values()) clearTimeout(t)
+  typingTimers.clear(); peers.clear(); floodState.clear(); histAcceptedFrom.clear()
+  reactions.clear(); seenIds.clear(); timeline.length = 0
+  prevRelays = 0; noPeerSince = 0
+}
+
 function allow(peerId, channel) {
   const [n, ms] = CONFIG.flood[channel] || CONFIG.flood.msg
   const k = peerId + ':' + channel
@@ -669,6 +708,7 @@ function setPeerName(peerId, value, fromMsg) {
   if (!isMuted(peerId)) addPresenceSys(prev ? `${prev} is now ${name}` : `${name} joined`)
   renderRoster()
   if (typingTimers.has(peerId)) renderTyping()
+  checkMyNameCollision()   // if this peer now shares my name, the higher selfId yields
 }
 
 function maybeMeshWarn() {
@@ -773,6 +813,7 @@ function handleSlash(text) {
     case 'nick': {
       const n = sanitize(arg, CONFIG.maxNameLen).trim()
       if (!n) { addSystem('Usage: /nick <new name>'); return true }
+      if (nameTakenByPeer(n)) { addSystem(`"${n}" is already taken in this room — pick another.`); return true }
       const old = myName; setMyName(n)
       if (actions) actions.name.send(myName)
       addSystem(`You are now "${myName}" (was "${old}")`)
@@ -1130,6 +1171,36 @@ const ANI = ['Otter', 'Fox', 'Heron', 'Lynx', 'Raven', 'Moth', 'Koi', 'Wren', 'I
 const surprise = () => ADJ[Math.floor(Math.random() * ADJ.length)] + ANI[Math.floor(Math.random() * ANI.length)]
 
 /* ------------------------------------------------------------------ *
+ * Join flow — connect, verify the name is free, then reveal the chat
+ * ------------------------------------------------------------------ */
+function setGateChecking(on) {
+  gateGo.disabled = on
+  gateGo.textContent = on ? 'Checking name…' : 'Join the chat →'
+}
+function showGateError(msg) { gateErr.textContent = msg; gateErr.hidden = false; nickInput.focus(); nickInput.select() }
+function revealApp() {
+  entered = true
+  gate.hidden = true; app.hidden = false; inputEl.focus()
+  refreshEmpty(); bumpActivity()
+}
+// Best-effort pre-entry uniqueness: join, discover present peers for a short
+// window (bailing early on a clash), reject if the name is taken.
+async function joinWithNameCheck() {
+  startChat()
+  if (!room) { revealApp(); return true }   // connection failed → let them in to see the error
+  const taken = await new Promise(resolve => {
+    const t0 = Date.now()
+    const iv = setInterval(() => {
+      if (nameTakenByPeer(myName)) { clearInterval(iv); resolve(true) }
+      else if (Date.now() - t0 > 2500) { clearInterval(iv); resolve(false) }
+    }, 150)
+  })
+  if (taken) { leaveAndReset(); renderRoster(); renderTimeline(); return false }
+  revealApp()
+  return true
+}
+
+/* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
 function boot() {
@@ -1160,17 +1231,21 @@ function boot() {
   surpriseBtn.addEventListener('click', () => { nickInput.value = surprise(); refreshAvatar(); nickInput.focus() })
   nickInput.focus()
 
-  gateForm.addEventListener('submit', e => {
+  gateForm.addEventListener('submit', async e => {
     e.preventDefault()
+    if (gateGo.disabled) return    // a check is already running
     const n = sanitize(nickInput.value, CONFIG.maxNameLen).trim()
     if (!n) { nickInput.focus(); return }
     if (!CONFIG.isDefaultRoom) {
       myPass = gatePass.value.trim()
       if (!myPass) { gatePass.focus(); gatePass.placeholder = '⚠ password required to enter this private room'; return }
     }
-    setMyName(n)
-    gate.hidden = true; app.hidden = false; inputEl.focus()
-    renderRoster(); refreshEmpty(); bumpActivity(); startChat()
+    gateErr.hidden = true
+    setMyName(n); renderRoster()
+    setGateChecking(true)
+    const ok = await joinWithNameCheck()
+    setGateChecking(false)
+    if (!ok) showGateError(`"${n}" is already taken in this room — choose a different name.`)
   })
 }
 
