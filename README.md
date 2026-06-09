@@ -138,7 +138,7 @@ Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node bui
 | Field        | What it does                                                              |
 |--------------|--------------------------------------------------------------------------|
 | `appId`      | Your app's namespace on the network. **Change it if you fork** this.      |
-| `roomId`     | Default room = `location.hostname`; a `#r=<code>` share code switches rooms. |
+| `roomId`     | Default = `location.hostname`; a `#r=<name>` (name + required password) makes a private room. |
 | `relayUrls` / `relayRedundancy` | Curated public Nostr relays + how many to use (pinned for reliable discovery). |
 | `historyShare` | How many recent messages a newcomer is handed (default 30).            |
 | `meshCap`    | Soft cap before suggesting an overflow room (default 12).                  |
@@ -146,11 +146,14 @@ Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node bui
 | `turnConfig` | Optional TURN servers (see above).                                        |
 | `maxNameLen` / `maxMsgLen` | Input length caps.                                          |
 
-**Rooms & sharing:** the default room is the whole domain. Click **🔗 Share → Start a
-new private room** to mint a `#r=<code>` room, then share the **link or the short code**
-(no QR — a code anyone can type). An optional **password** (Trystero-native, client-side)
-makes a room truly private. All of it is just room-ids over the same free relays — no
-server, no database.
+**Rooms & sharing:** the default room is the whole domain (public). Click the **Rooms**
+button (top-right) to **create or join a private room by name** — pick any name/number
+plus a **required password**. Only people who enter the *same name **and** password*
+connect: Trystero derives the channel key from both, so a wrong password reaches no one
+(the password never goes in the URL). Invite by sharing the link (`#r=<name>`) and giving
+people the password **separately**. Rooms are just room-ids over the free relays —
+nothing is stored, and a room vanishes the moment its last person leaves. No server, no
+database.
 
 ---
 
@@ -162,7 +165,7 @@ server, no database.
   minimal markdown** (`**bold**`, `_italic_`, `` `code` ``) rendered as DOM nodes only.
 - **Live history hand-off** — a newcomer is handed the last ~30 messages (and their
   reactions) by the single elected peer already in the room.
-- **Private rooms via share code** (`#r=<code>`), optional **room password**, and an
+- **Private rooms by custom name + required password** (`#r=<name>`, cryptographically gated), and an
   overflow-room suggestion when a mesh gets large.
 - **Emoji reactions**, **reply / quote**, **slash commands** (`/nick /me /who /clear
   /help /shrug`), and a searchable **emoji picker** with recents.

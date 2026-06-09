@@ -74,7 +74,9 @@ button { font-family: inherit; color: inherit; }
 /* ===================== app shell ===================== */
 .app { display: flex; flex-direction: column; height: 100dvh; }
 .app[hidden] { display: none; }
-.topbar { display: grid; grid-template-columns: 1fr minmax(0,auto) 1fr; align-items: center; gap: 12px; padding: 10px 14px; padding-top: max(10px,env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 78%, transparent); backdrop-filter: blur(12px); }
+/* NOTE: no backdrop-filter here — it would create a stacking context on the topbar
+   (which paints before .body), pushing the dropdown popovers behind the chat. */
+.topbar { display: grid; grid-template-columns: 1fr minmax(0,auto) 1fr; align-items: center; gap: 12px; padding: 10px 14px; padding-top: max(10px,env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--bg-2); }
 .tb-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tb-center { display: flex; justify-content: center; min-width: 0; }
 .tb-right { display: flex; align-items: center; gap: 8px; justify-content: flex-end; min-width: 0; }
@@ -113,6 +115,10 @@ button { font-family: inherit; color: inherit; }
 .share-b { flex: 1; padding: 9px 8px; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--txt); border-radius: 10px; cursor: pointer; }
 .share-b:hover { border-color: var(--accent); background: var(--panel-3); }
 .share-new { width: 100%; margin-top: 8px; flex: none; }
+.rooms-lbl { font-size: 13px; }
+.pop-h.mt { margin-top: 16px; }
+.room-input { width: 100%; margin-bottom: 8px; padding: 9px 12px; font-size: 14px; color: var(--txt); background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+.room-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.2); }
 
 /* banner */
 .banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; background: color-mix(in srgb, var(--warn) 16%, var(--bg-2)); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--txt); }
@@ -265,7 +271,7 @@ button { font-family: inherit; color: inherit; }
 @media (max-width: 860px) { :root { --side-w: 230px; } }
 @media (max-width: 720px) {
   .brand { display: none; } .status-text { display: none; } .status { padding: 6px 8px; }
-  .mobile-only { display: inline-flex; } .headline { font-size: 15px; } .mechip { display: none; }
+  .mobile-only { display: inline-flex; } .headline { font-size: 15px; } .mechip { display: none; } .rooms-lbl { display: none; }
   .roomchip { max-width: 96px; }
   .iconpill { min-height: 40px; min-width: 40px; justify-content: center; padding: 8px 12px; }
   .side { position: absolute; top: 0; bottom: 0; width: min(290px,84vw); z-index: 40; background: var(--bg-2); box-shadow: var(--shadow); transition: transform .24s ease; padding-top: max(4px,env(safe-area-inset-top)); }

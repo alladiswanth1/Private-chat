@@ -10,11 +10,12 @@ import {joinRoom, selfId, getRelaySockets} from './vendor/trystero-nostr.bundle.
 /* ------------------------------------------------------------------ *
  * Room code from URL (#r=<code>) + address-bar normalization
  * ------------------------------------------------------------------ */
+const normName = s => String(s || '').trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase().slice(0, 32)
 function parseRoomCode() {
   const m = location.hash.match(/[#&]r=([^&]+)/)
   let c = ''
   if (m) { try { c = decodeURIComponent(m[1]) } catch { c = m[1] } }
-  return c.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32)
+  return normName(c)
 }
 const ROOM_CODE = parseRoomCode()
 // Any deep URL or junk is collapsed; a valid #r=code is preserved. replaceState =
@@ -38,9 +39,10 @@ const CONFIG = {
   relayUrls: [
     'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band',
     'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.snort.social',
-    'wss://nostr.wine', 'wss://relay.nostr.bg',
+    'wss://nostr.wine', 'wss://relay.nostr.bg', 'wss://relay.0xchat.com',
+    'wss://nostr.bitcoiner.social', 'wss://relay.nostr.net', 'wss://offchain.pub',
   ],
-  relayRedundancy: 8,
+  relayRedundancy: 10,
   turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
   maxNameLen: 24,
   maxMsgLen: 4000,
@@ -69,7 +71,7 @@ const peopleToggle = $('#people-toggle'), peopleClose = $('#people-close')
 const rulesToggle = $('#rules-toggle'), rulesClose = $('#rules-close')
 const scrim = $('#scrim'), meName = $('#me-name'), meDot = $('#me-dot')
 const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
-const shareBtn = $('#share-btn'), sharePanel = $('#share'), shareCodeEl = $('#share-code'), shareLinkBtn = $('#share-copy-link'), shareCodeBtn = $('#share-copy-code'), shareNewBtn = $('#share-new')
+const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
 const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 
@@ -511,6 +513,18 @@ function showFatal(err) {
     : `Could not connect: ${(err && err.message) || 'unknown error'}. Try reloading.`)
 }
 
+// Manual reconnect: leave the room, reset peer/connection state (keep the chat
+// timeline), and re-join. Used by the status panel's Reconnect button.
+function reconnect() {
+  try { if (room) room.leave() } catch {}
+  room = null; actions = null
+  for (const t of typingTimers.values()) clearTimeout(t)
+  typingTimers.clear(); peers.clear(); histAcceptedFrom.clear(); floodState.clear()
+  prevRelays = 0; noPeerSince = 0
+  renderRoster(); renderTyping(); addSystem('Reconnecting…')
+  startChat()
+}
+
 function allow(peerId, channel) {
   const [n, ms] = CONFIG.flood[channel] || CONFIG.flood.msg
   const k = peerId + ':' + channel
@@ -796,7 +810,7 @@ function updateSendBtn() { sendBtn.disabled = !inputEl.value.trim() }
 /* ------------------------------------------------------------------ *
  * Connection status + relay/ping panel
  * ------------------------------------------------------------------ */
-let prevRelays = 0, noPeerSince = 0
+let prevRelays = 0, noPeerSince = 0, statusTimer = null
 function relayStates() {
   try { return Object.entries(getRelaySockets() || {}).map(([url, s]) => ({url, open: s && s.readyState === 1})) } catch { return [] }
 }
@@ -816,7 +830,9 @@ function updateStatusLoop() {
     if (online > 0) noPeerSince = 0
     prevRelays = relays
   }
-  tick(); setInterval(tick, 2000)
+  tick()
+  if (statusTimer) clearInterval(statusTimer)   // avoid duplicate timers on reconnect
+  statusTimer = setInterval(tick, 2000)
 }
 function setStatus(t) { if (statusText.textContent !== t) { statusText.textContent = t; announceStatus(t) } }
 
@@ -838,6 +854,10 @@ async function openStatusPanel() {
     r.append(u, ms); statusPanel.appendChild(r)
     if (room && room.ping) room.ping(id).then(v => { ms.textContent = Math.round(v) + 'ms' }).catch(() => { ms.textContent = '—' })
   }
+  const rc = document.createElement('button')
+  rc.type = 'button'; rc.className = 'share-b'; rc.textContent = '↻ Reconnect'; rc.style.marginTop = '10px'; rc.style.width = '100%'
+  rc.addEventListener('click', () => { statusPanel.hidden = true; reconnect() })
+  statusPanel.appendChild(rc)
   statusPanel.hidden = false
 }
 function toggleStatusPanel() { statusPanel.hidden ? openStatusPanel() : (statusPanel.hidden = true) }
@@ -910,32 +930,38 @@ emojiGrid.addEventListener('keydown', e => {
  * Rooms / share code
  * ------------------------------------------------------------------ */
 function shareUrl(code = CONFIG.roomCode) { return location.origin + (code ? '/#r=' + code : '/') }
-function genCode() {
-  const a = 'abcdefghijkmnpqrstuvwxyz23456789'
-  let s = ''
-  for (let i = 0; i < 7; i++) s += a[Math.floor(Math.random() * a.length)]
-  return s
-}
 function copyText(text, btn, restore) {
   const done = ok => { if (btn) { btn.textContent = ok ? '✓ Copied' : 'Copy failed'; setTimeout(() => { btn.textContent = restore }, 1400) } }
   try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)) } catch { done(false) }
 }
-function openSharePanel() {
-  shareCodeEl.textContent = CONFIG.isDefaultRoom ? '(public room — make a private one below)' : CONFIG.roomCode
-  sharePanel.hidden = false
+function openRoomsPanel() {
+  if (CONFIG.isDefaultRoom) {
+    roomCurrentEl.textContent = "You're in the public room — open to anyone on this site."
+    roomsCopyName.hidden = true; roomPublicBtn.hidden = true
+  } else {
+    roomCurrentEl.textContent = `Private room: "${CONFIG.roomCode}". Invite by sharing the link, and tell people the password separately.`
+    roomsCopyName.hidden = false; roomPublicBtn.hidden = false
+  }
+  roomsPanel.hidden = false
+  setTimeout(() => roomNameInput.focus(), 0)
 }
-function gotoRoom(code, pass) {
-  const url = shareUrl(code) + (pass ? '' : '')
-  // navigate (full load) into the new room; password is never put in the URL
-  if (pass) sessionStorage.setItem('c2c-pass-' + code, pass)
-  location.href = url
+// Navigate (full load) into a named private room. The password rides in
+// sessionStorage (never the URL) and gates the room cryptographically: only
+// peers with the same name AND password derive the same channel key.
+function gotoRoom(name, pass) {
+  const n = normName(name)
+  if (!n || !pass) return
+  try { sessionStorage.setItem('c2c-pass-' + n, pass) } catch {}
+  // a hash-only change does NOT reload the SPA, so force a reload into the new room
+  history.replaceState(null, '', '/#r=' + n)
+  location.reload()
 }
 function showMeshBanner() {
   if (!bannerEl.hidden) return
   bannerEl.replaceChildren()
   const t = document.createElement('span'); t.textContent = `Busy room (${peers.size + 1} here). Big meshes get heavy — `
-  const b = document.createElement('button'); b.type = 'button'; b.className = 'banner-btn'; b.textContent = 'open an overflow room'
-  b.addEventListener('click', () => gotoRoom(genCode(), ''))
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'banner-btn'; b.textContent = 'make a private room'
+  b.addEventListener('click', () => { bannerEl.hidden = true; openRoomsPanel() })
   const x = document.createElement('button'); x.type = 'button'; x.className = 'banner-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Dismiss')
   x.addEventListener('click', () => { bannerEl.hidden = true })
   bannerEl.append(t, b, x); bannerEl.hidden = false
@@ -1048,11 +1074,19 @@ document.addEventListener('click', e => { if (!emojiPanel.hidden && !emojiPanel.
 statusBtn.addEventListener('click', e => { e.stopPropagation(); toggleStatusPanel() })
 document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) statusPanel.hidden = true })
 
-shareBtn.addEventListener('click', e => { e.stopPropagation(); sharePanel.hidden ? openSharePanel() : (sharePanel.hidden = true) })
-document.addEventListener('click', e => { if (!sharePanel.hidden && !sharePanel.contains(e.target) && !shareBtn.contains(e.target)) sharePanel.hidden = true })
-shareLinkBtn.addEventListener('click', () => copyText(shareUrl(), shareLinkBtn, '🔗 Copy link'))
-shareCodeBtn.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, shareCodeBtn, '# Copy code') })
-shareNewBtn.addEventListener('click', () => gotoRoom(genCode(), ''))
+roomsBtn.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden ? openRoomsPanel() : (roomsPanel.hidden = true) })
+document.addEventListener('click', e => { if (!roomsPanel.hidden && !roomsPanel.contains(e.target) && !roomsBtn.contains(e.target)) roomsPanel.hidden = true })
+roomsCopyLink.addEventListener('click', () => copyText(shareUrl(), roomsCopyLink, '🔗 Copy link'))
+roomsCopyName.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, roomsCopyName, '# Copy name') })
+roomGoBtn.addEventListener('click', () => {
+  const n = normName(roomNameInput.value), pass = roomPassInput.value.trim()
+  if (!n) { roomNameInput.focus(); return }
+  if (!pass) { roomPassInput.focus(); return }
+  gotoRoom(n, pass)
+})
+roomNameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomPassInput.focus() } })
+roomPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomGoBtn.click() } })
+roomPublicBtn.addEventListener('click', () => { history.replaceState(null, '', '/'); location.reload() })
 
 themeBtn.addEventListener('click', cycleTheme)
 blurBtn.addEventListener('click', toggleBlur)
@@ -1066,7 +1100,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Tab') trapTab(e)
   if (e.key !== 'Escape') return
   if (!emojiPanel.hidden) { emojiPanel.hidden = true; emojiBtn.focus(); return }
-  if (!sharePanel.hidden) { sharePanel.hidden = true; return }
+  if (!roomsPanel.hidden) { roomsPanel.hidden = true; return }
   if (!statusPanel.hidden) { statusPanel.hidden = true; return }
   if (reactMenu) { closeReactMenu(); return }
   if (peopleEl.classList.contains('open') || rulesEl.classList.contains('open')) closePanels()
@@ -1130,8 +1164,11 @@ function boot() {
     e.preventDefault()
     const n = sanitize(nickInput.value, CONFIG.maxNameLen).trim()
     if (!n) { nickInput.focus(); return }
+    if (!CONFIG.isDefaultRoom) {
+      myPass = gatePass.value.trim()
+      if (!myPass) { gatePass.focus(); gatePass.placeholder = '⚠ password required to enter this private room'; return }
+    }
     setMyName(n)
-    if (!CONFIG.isDefaultRoom) myPass = gatePass.value.trim()
     gate.hidden = true; app.hidden = false; inputEl.focus()
     renderRoster(); refreshEmpty(); bumpActivity(); startChat()
   })

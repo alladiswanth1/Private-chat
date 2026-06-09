@@ -86,7 +86,9 @@ button { font-family: inherit; color: inherit; }
 /* ===================== app shell ===================== */
 .app { display: flex; flex-direction: column; height: 100dvh; }
 .app[hidden] { display: none; }
-.topbar { display: grid; grid-template-columns: 1fr minmax(0,auto) 1fr; align-items: center; gap: 12px; padding: 10px 14px; padding-top: max(10px,env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg-2) 78%, transparent); backdrop-filter: blur(12px); }
+/* NOTE: no backdrop-filter here — it would create a stacking context on the topbar
+   (which paints before .body), pushing the dropdown popovers behind the chat. */
+.topbar { display: grid; grid-template-columns: 1fr minmax(0,auto) 1fr; align-items: center; gap: 12px; padding: 10px 14px; padding-top: max(10px,env(safe-area-inset-top)); border-bottom: 1px solid var(--line); background: var(--bg-2); }
 .tb-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tb-center { display: flex; justify-content: center; min-width: 0; }
 .tb-right { display: flex; align-items: center; gap: 8px; justify-content: flex-end; min-width: 0; }
@@ -125,6 +127,10 @@ button { font-family: inherit; color: inherit; }
 .share-b { flex: 1; padding: 9px 8px; font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--txt); border-radius: 10px; cursor: pointer; }
 .share-b:hover { border-color: var(--accent); background: var(--panel-3); }
 .share-new { width: 100%; margin-top: 8px; flex: none; }
+.rooms-lbl { font-size: 13px; }
+.pop-h.mt { margin-top: 16px; }
+.room-input { width: 100%; margin-bottom: 8px; padding: 9px 12px; font-size: 14px; color: var(--txt); background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; outline: none; }
+.room-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(109,140,255,.2); }
 
 /* banner */
 .banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; background: color-mix(in srgb, var(--warn) 16%, var(--bg-2)); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--txt); }
@@ -277,7 +283,7 @@ button { font-family: inherit; color: inherit; }
 @media (max-width: 860px) { :root { --side-w: 230px; } }
 @media (max-width: 720px) {
   .brand { display: none; } .status-text { display: none; } .status { padding: 6px 8px; }
-  .mobile-only { display: inline-flex; } .headline { font-size: 15px; } .mechip { display: none; }
+  .mobile-only { display: inline-flex; } .headline { font-size: 15px; } .mechip { display: none; } .rooms-lbl { display: none; }
   .roomchip { max-width: 96px; }
   .iconpill { min-height: 40px; min-width: 40px; justify-content: center; padding: 8px 12px; }
   .side { position: absolute; top: 0; bottom: 0; width: min(290px,84vw); z-index: 40; background: var(--bg-2); box-shadow: var(--shadow); transition: transform .24s ease; padding-top: max(4px,env(safe-area-inset-top)); }
@@ -321,8 +327,8 @@ button { font-family: inherit; color: inherit; }
         <button id="surprise" class="gate-dice" type="button" title="Surprise me">🎲</button>
       </div>
       <div id="gate-pass-wrap" class="gate-passwrap" hidden>
-        <label class="gate-label" for="gate-pass">Room password (optional — must match other people in this room)</label>
-        <input id="gate-pass" class="gate-input" type="password" maxlength="64" placeholder="leave blank if none" autocomplete="off" />
+        <label class="gate-label" for="gate-pass">Password for this private room (required — must match exactly)</label>
+        <input id="gate-pass" class="gate-input" type="password" maxlength="64" placeholder="enter the room's password" autocomplete="off" />
       </div>
       <button id="gate-go" class="gate-btn" type="submit">Join the chat →</button>
       <p class="gate-trio"><span>🔒 end&#8209;to&#8209;end encrypted</span><span>🚫 no servers</span><span>💨 vanishes</span></p>
@@ -345,16 +351,20 @@ button { font-family: inherit; color: inherit; }
           <div id="status-panel" class="pop status-panel" hidden></div>
         </div>
         <div class="pop-wrap">
-          <button id="share-btn" class="iconpill" type="button" aria-label="Share this room">🔗</button>
-          <div id="share" class="pop share-panel" hidden>
-            <div class="pop-h">Invite people</div>
-            <p class="share-note">Anyone with the link or code joins this exact room — no account, no server.</p>
-            <div class="share-code" id="share-code"></div>
+          <button id="rooms-btn" class="iconpill" type="button" aria-label="Rooms — create or join"><span class="ico">🚪</span><span class="rooms-lbl">Rooms</span></button>
+          <div id="rooms" class="pop rooms-panel" hidden>
+            <div class="pop-h">This room</div>
+            <p id="room-current" class="share-note">You're in the public room.</p>
             <div class="share-btns">
-              <button id="share-copy-link" class="share-b" type="button">🔗 Copy link</button>
-              <button id="share-copy-code" class="share-b" type="button"># Copy code</button>
+              <button id="rooms-copy-link" class="share-b" type="button">🔗 Copy link</button>
+              <button id="rooms-copy-name" class="share-b" type="button" hidden># Copy name</button>
             </div>
-            <button id="share-new" class="share-b share-new" type="button">✨ Start a new private room</button>
+            <button id="room-public" class="share-b share-new" type="button" hidden>← Back to public room</button>
+            <div class="pop-h mt">Create or join a private room</div>
+            <input id="room-name" class="room-input" type="text" maxlength="32" placeholder="room name or number" autocomplete="off" spellcheck="false" />
+            <input id="room-pass" class="room-input" type="password" maxlength="64" placeholder="room password (required)" autocomplete="off" />
+            <button id="room-go" class="share-b share-new" type="button">Go →</button>
+            <p class="share-note">Anyone with the <strong>same name + password</strong> joins — it's cryptographically gated, nothing is stored, and the room vanishes when everyone leaves. Share the password <em>separately</em> from the link.</p>
           </div>
         </div>
         <button id="people-toggle" class="iconpill" type="button" aria-label="Who's online" aria-expanded="false"><span class="ico">👥</span><span id="online-count">1</span></button>
@@ -450,11 +460,12 @@ const {joinRoom, selfId, getRelaySockets} = globalThis.__T;
 /* ------------------------------------------------------------------ *
  * Room code from URL (#r=<code>) + address-bar normalization
  * ------------------------------------------------------------------ */
+const normName = s => String(s || '').trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase().slice(0, 32)
 function parseRoomCode() {
   const m = location.hash.match(/[#&]r=([^&]+)/)
   let c = ''
   if (m) { try { c = decodeURIComponent(m[1]) } catch { c = m[1] } }
-  return c.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32)
+  return normName(c)
 }
 const ROOM_CODE = parseRoomCode()
 // Any deep URL or junk is collapsed; a valid #r=code is preserved. replaceState =
@@ -478,9 +489,10 @@ const CONFIG = {
   relayUrls: [
     'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band',
     'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.snort.social',
-    'wss://nostr.wine', 'wss://relay.nostr.bg',
+    'wss://nostr.wine', 'wss://relay.nostr.bg', 'wss://relay.0xchat.com',
+    'wss://nostr.bitcoiner.social', 'wss://relay.nostr.net', 'wss://offchain.pub',
   ],
-  relayRedundancy: 8,
+  relayRedundancy: 10,
   turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
   maxNameLen: 24,
   maxMsgLen: 4000,
@@ -509,7 +521,7 @@ const peopleToggle = $('#people-toggle'), peopleClose = $('#people-close')
 const rulesToggle = $('#rules-toggle'), rulesClose = $('#rules-close')
 const scrim = $('#scrim'), meName = $('#me-name'), meDot = $('#me-dot')
 const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
-const shareBtn = $('#share-btn'), sharePanel = $('#share'), shareCodeEl = $('#share-code'), shareLinkBtn = $('#share-copy-link'), shareCodeBtn = $('#share-copy-code'), shareNewBtn = $('#share-new')
+const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
 const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 
@@ -951,6 +963,18 @@ function showFatal(err) {
     : `Could not connect: ${(err && err.message) || 'unknown error'}. Try reloading.`)
 }
 
+// Manual reconnect: leave the room, reset peer/connection state (keep the chat
+// timeline), and re-join. Used by the status panel's Reconnect button.
+function reconnect() {
+  try { if (room) room.leave() } catch {}
+  room = null; actions = null
+  for (const t of typingTimers.values()) clearTimeout(t)
+  typingTimers.clear(); peers.clear(); histAcceptedFrom.clear(); floodState.clear()
+  prevRelays = 0; noPeerSince = 0
+  renderRoster(); renderTyping(); addSystem('Reconnecting…')
+  startChat()
+}
+
 function allow(peerId, channel) {
   const [n, ms] = CONFIG.flood[channel] || CONFIG.flood.msg
   const k = peerId + ':' + channel
@@ -1236,7 +1260,7 @@ function updateSendBtn() { sendBtn.disabled = !inputEl.value.trim() }
 /* ------------------------------------------------------------------ *
  * Connection status + relay/ping panel
  * ------------------------------------------------------------------ */
-let prevRelays = 0, noPeerSince = 0
+let prevRelays = 0, noPeerSince = 0, statusTimer = null
 function relayStates() {
   try { return Object.entries(getRelaySockets() || {}).map(([url, s]) => ({url, open: s && s.readyState === 1})) } catch { return [] }
 }
@@ -1256,7 +1280,9 @@ function updateStatusLoop() {
     if (online > 0) noPeerSince = 0
     prevRelays = relays
   }
-  tick(); setInterval(tick, 2000)
+  tick()
+  if (statusTimer) clearInterval(statusTimer)   // avoid duplicate timers on reconnect
+  statusTimer = setInterval(tick, 2000)
 }
 function setStatus(t) { if (statusText.textContent !== t) { statusText.textContent = t; announceStatus(t) } }
 
@@ -1278,6 +1304,10 @@ async function openStatusPanel() {
     r.append(u, ms); statusPanel.appendChild(r)
     if (room && room.ping) room.ping(id).then(v => { ms.textContent = Math.round(v) + 'ms' }).catch(() => { ms.textContent = '—' })
   }
+  const rc = document.createElement('button')
+  rc.type = 'button'; rc.className = 'share-b'; rc.textContent = '↻ Reconnect'; rc.style.marginTop = '10px'; rc.style.width = '100%'
+  rc.addEventListener('click', () => { statusPanel.hidden = true; reconnect() })
+  statusPanel.appendChild(rc)
   statusPanel.hidden = false
 }
 function toggleStatusPanel() { statusPanel.hidden ? openStatusPanel() : (statusPanel.hidden = true) }
@@ -1350,32 +1380,38 @@ emojiGrid.addEventListener('keydown', e => {
  * Rooms / share code
  * ------------------------------------------------------------------ */
 function shareUrl(code = CONFIG.roomCode) { return location.origin + (code ? '/#r=' + code : '/') }
-function genCode() {
-  const a = 'abcdefghijkmnpqrstuvwxyz23456789'
-  let s = ''
-  for (let i = 0; i < 7; i++) s += a[Math.floor(Math.random() * a.length)]
-  return s
-}
 function copyText(text, btn, restore) {
   const done = ok => { if (btn) { btn.textContent = ok ? '✓ Copied' : 'Copy failed'; setTimeout(() => { btn.textContent = restore }, 1400) } }
   try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)) } catch { done(false) }
 }
-function openSharePanel() {
-  shareCodeEl.textContent = CONFIG.isDefaultRoom ? '(public room — make a private one below)' : CONFIG.roomCode
-  sharePanel.hidden = false
+function openRoomsPanel() {
+  if (CONFIG.isDefaultRoom) {
+    roomCurrentEl.textContent = "You're in the public room — open to anyone on this site."
+    roomsCopyName.hidden = true; roomPublicBtn.hidden = true
+  } else {
+    roomCurrentEl.textContent = `Private room: "${CONFIG.roomCode}". Invite by sharing the link, and tell people the password separately.`
+    roomsCopyName.hidden = false; roomPublicBtn.hidden = false
+  }
+  roomsPanel.hidden = false
+  setTimeout(() => roomNameInput.focus(), 0)
 }
-function gotoRoom(code, pass) {
-  const url = shareUrl(code) + (pass ? '' : '')
-  // navigate (full load) into the new room; password is never put in the URL
-  if (pass) sessionStorage.setItem('c2c-pass-' + code, pass)
-  location.href = url
+// Navigate (full load) into a named private room. The password rides in
+// sessionStorage (never the URL) and gates the room cryptographically: only
+// peers with the same name AND password derive the same channel key.
+function gotoRoom(name, pass) {
+  const n = normName(name)
+  if (!n || !pass) return
+  try { sessionStorage.setItem('c2c-pass-' + n, pass) } catch {}
+  // a hash-only change does NOT reload the SPA, so force a reload into the new room
+  history.replaceState(null, '', '/#r=' + n)
+  location.reload()
 }
 function showMeshBanner() {
   if (!bannerEl.hidden) return
   bannerEl.replaceChildren()
   const t = document.createElement('span'); t.textContent = `Busy room (${peers.size + 1} here). Big meshes get heavy — `
-  const b = document.createElement('button'); b.type = 'button'; b.className = 'banner-btn'; b.textContent = 'open an overflow room'
-  b.addEventListener('click', () => gotoRoom(genCode(), ''))
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'banner-btn'; b.textContent = 'make a private room'
+  b.addEventListener('click', () => { bannerEl.hidden = true; openRoomsPanel() })
   const x = document.createElement('button'); x.type = 'button'; x.className = 'banner-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Dismiss')
   x.addEventListener('click', () => { bannerEl.hidden = true })
   bannerEl.append(t, b, x); bannerEl.hidden = false
@@ -1488,11 +1524,19 @@ document.addEventListener('click', e => { if (!emojiPanel.hidden && !emojiPanel.
 statusBtn.addEventListener('click', e => { e.stopPropagation(); toggleStatusPanel() })
 document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) statusPanel.hidden = true })
 
-shareBtn.addEventListener('click', e => { e.stopPropagation(); sharePanel.hidden ? openSharePanel() : (sharePanel.hidden = true) })
-document.addEventListener('click', e => { if (!sharePanel.hidden && !sharePanel.contains(e.target) && !shareBtn.contains(e.target)) sharePanel.hidden = true })
-shareLinkBtn.addEventListener('click', () => copyText(shareUrl(), shareLinkBtn, '🔗 Copy link'))
-shareCodeBtn.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, shareCodeBtn, '# Copy code') })
-shareNewBtn.addEventListener('click', () => gotoRoom(genCode(), ''))
+roomsBtn.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden ? openRoomsPanel() : (roomsPanel.hidden = true) })
+document.addEventListener('click', e => { if (!roomsPanel.hidden && !roomsPanel.contains(e.target) && !roomsBtn.contains(e.target)) roomsPanel.hidden = true })
+roomsCopyLink.addEventListener('click', () => copyText(shareUrl(), roomsCopyLink, '🔗 Copy link'))
+roomsCopyName.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, roomsCopyName, '# Copy name') })
+roomGoBtn.addEventListener('click', () => {
+  const n = normName(roomNameInput.value), pass = roomPassInput.value.trim()
+  if (!n) { roomNameInput.focus(); return }
+  if (!pass) { roomPassInput.focus(); return }
+  gotoRoom(n, pass)
+})
+roomNameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomPassInput.focus() } })
+roomPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomGoBtn.click() } })
+roomPublicBtn.addEventListener('click', () => { history.replaceState(null, '', '/'); location.reload() })
 
 themeBtn.addEventListener('click', cycleTheme)
 blurBtn.addEventListener('click', toggleBlur)
@@ -1506,7 +1550,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Tab') trapTab(e)
   if (e.key !== 'Escape') return
   if (!emojiPanel.hidden) { emojiPanel.hidden = true; emojiBtn.focus(); return }
-  if (!sharePanel.hidden) { sharePanel.hidden = true; return }
+  if (!roomsPanel.hidden) { roomsPanel.hidden = true; return }
   if (!statusPanel.hidden) { statusPanel.hidden = true; return }
   if (reactMenu) { closeReactMenu(); return }
   if (peopleEl.classList.contains('open') || rulesEl.classList.contains('open')) closePanels()
@@ -1570,8 +1614,11 @@ function boot() {
     e.preventDefault()
     const n = sanitize(nickInput.value, CONFIG.maxNameLen).trim()
     if (!n) { nickInput.focus(); return }
+    if (!CONFIG.isDefaultRoom) {
+      myPass = gatePass.value.trim()
+      if (!myPass) { gatePass.focus(); gatePass.placeholder = '⚠ password required to enter this private room'; return }
+    }
     setMyName(n)
-    if (!CONFIG.isDefaultRoom) myPass = gatePass.value.trim()
     gate.hidden = true; app.hidden = false; inputEl.focus()
     renderRoster(); refreshEmpty(); bumpActivity(); startChat()
   })

@@ -27,8 +27,8 @@
         <button id="surprise" class="gate-dice" type="button" title="Surprise me">🎲</button>
       </div>
       <div id="gate-pass-wrap" class="gate-passwrap" hidden>
-        <label class="gate-label" for="gate-pass">Room password (optional — must match other people in this room)</label>
-        <input id="gate-pass" class="gate-input" type="password" maxlength="64" placeholder="leave blank if none" autocomplete="off" />
+        <label class="gate-label" for="gate-pass">Password for this private room (required — must match exactly)</label>
+        <input id="gate-pass" class="gate-input" type="password" maxlength="64" placeholder="enter the room's password" autocomplete="off" />
       </div>
       <button id="gate-go" class="gate-btn" type="submit">Join the chat →</button>
       <p class="gate-trio"><span>🔒 end&#8209;to&#8209;end encrypted</span><span>🚫 no servers</span><span>💨 vanishes</span></p>
@@ -51,16 +51,20 @@
           <div id="status-panel" class="pop status-panel" hidden></div>
         </div>
         <div class="pop-wrap">
-          <button id="share-btn" class="iconpill" type="button" aria-label="Share this room">🔗</button>
-          <div id="share" class="pop share-panel" hidden>
-            <div class="pop-h">Invite people</div>
-            <p class="share-note">Anyone with the link or code joins this exact room — no account, no server.</p>
-            <div class="share-code" id="share-code"></div>
+          <button id="rooms-btn" class="iconpill" type="button" aria-label="Rooms — create or join"><span class="ico">🚪</span><span class="rooms-lbl">Rooms</span></button>
+          <div id="rooms" class="pop rooms-panel" hidden>
+            <div class="pop-h">This room</div>
+            <p id="room-current" class="share-note">You're in the public room.</p>
             <div class="share-btns">
-              <button id="share-copy-link" class="share-b" type="button">🔗 Copy link</button>
-              <button id="share-copy-code" class="share-b" type="button"># Copy code</button>
+              <button id="rooms-copy-link" class="share-b" type="button">🔗 Copy link</button>
+              <button id="rooms-copy-name" class="share-b" type="button" hidden># Copy name</button>
             </div>
-            <button id="share-new" class="share-b share-new" type="button">✨ Start a new private room</button>
+            <button id="room-public" class="share-b share-new" type="button" hidden>← Back to public room</button>
+            <div class="pop-h mt">Create or join a private room</div>
+            <input id="room-name" class="room-input" type="text" maxlength="32" placeholder="room name or number" autocomplete="off" spellcheck="false" />
+            <input id="room-pass" class="room-input" type="password" maxlength="64" placeholder="room password (required)" autocomplete="off" />
+            <button id="room-go" class="share-b share-new" type="button">Go →</button>
+            <p class="share-note">Anyone with the <strong>same name + password</strong> joins — it's cryptographically gated, nothing is stored, and the room vanishes when everyone leaves. Share the password <em>separately</em> from the link.</p>
           </div>
         </div>
         <button id="people-toggle" class="iconpill" type="button" aria-label="Who's online" aria-expanded="false"><span class="ico">👥</span><span id="online-count">1</span></button>
