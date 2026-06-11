@@ -46,7 +46,7 @@ src/                             ← editable sources (repo-only, NOT served)
 build.mjs                        inlines src/* → docs/index.html (+ docs/404.html)
 docs/                            ← the published site (GitHub Pages source = /docs)
   index.html                     single self-contained page (CSS + JS all inlined)
-  404.html                       identical copy; any unknown URL serves the app
+  404.html                       same app + a 404 flag; any unknown URL serves the app
   CNAME  .nojekyll               GitHub Pages config (the only other served files)
 README.md  .gitignore            repo-only files (not served)
 ```
@@ -138,7 +138,7 @@ Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node bui
 | Field        | What it does                                                              |
 |--------------|--------------------------------------------------------------------------|
 | `appId`      | Your app's namespace on the network. **Change it if you fork** this.      |
-| `roomId`     | Default = `location.hostname`; a `#r=<name>` (name + required password) makes a private room. |
+| `roomId`     | Default = host (+ `/repo/` subpath on project sites); a `#r=<name>` (name + required password) makes a private room. |
 | `relayUrls` / `relayRedundancy` | Curated public Nostr relays + how many to use (pinned for reliable discovery). |
 | `historyShare` | How many recent messages a newcomer is handed (default 30).            |
 | `meshCap`    | Soft cap before suggesting an overflow room (default 12).                  |
@@ -201,3 +201,13 @@ database.
   down at once, new connections couldn't form (existing P2P links keep working).
 - Browsers cap simultaneous WebRTC connections, so this suits small/medium rooms, not
   thousands of concurrent peers in one mesh.
+- **No server means no referee.** Two mechanisms trust the random per-session peer
+  id ordering: name-collision resolution (higher id yields) and history-sender
+  election (lowest id sends). A determined attacker could regenerate ids until
+  they hold a very low one, letting them win name clashes or get elected to hand
+  newcomers a forged history (self-impersonation is rejected, reply quotes and
+  live messages never trust claimed identity, and the `#id` badge always exposes
+  same-named peers — but history from before you joined is ultimately hearsay).
+- The **10 MB file cap is enforced on what gets kept/shown**, not on the wire: a
+  hostile peer could still stream you junk bytes before the cap rejects it. Mute
+  (or leave) cuts them off.

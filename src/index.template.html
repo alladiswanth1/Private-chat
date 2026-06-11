@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss: https:; base-uri 'none'; form-action 'none'" />
+  <!-- connect-src token below is replaced at build time with the exact relay origins from CONFIG.relayUrls. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src __CSP_CONNECT__; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />

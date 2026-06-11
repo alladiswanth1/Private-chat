@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss: https:; base-uri 'none'; form-action 'none'" />
+  <!-- connect-src token below is replaced at build time with the exact relay origins from CONFIG.relayUrls. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.snort.social wss://nostr.wine wss://relay.nostr.bg wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />
@@ -339,6 +340,7 @@ button { font-family: inherit; color: inherit; }
 </style>
 </head>
 <body>
+<script>window.__C2C_404 = 1</script>
   <a class="skip" href="#input">Skip to message box</a>
 
   <!-- Nickname gate -->
@@ -498,6 +500,34 @@ var Kr=Object.defineProperty;var $r=(e,n,t)=>n in e?Kr(e,n,{enumerable:!0,config
 
 const {joinRoom, selfId, getRelaySockets} = globalThis.__T;
 
+// Best-effort clickjacking guard. GitHub Pages can't send frame-ancestors /
+// X-Frame-Options headers (and frame-ancestors is ignored in a meta CSP), so
+// bust out of any embedding frame; if the framer blocks that, hide the app.
+try { if (window.top !== window.self) window.top.location.replace(location.href) } catch { document.documentElement.hidden = true }
+
+/* ------------------------------------------------------------------ *
+ * Base path — lets the app run at a domain root AND under a /repo/
+ * subpath (GitHub Pages project sites). index.html knows its own
+ * directory; the 404.html copy (flagged by the build) serves unknown
+ * deep paths, so it falls back to the base remembered from a direct
+ * visit, then to the first path segment on *.github.io, then to /.
+ * ------------------------------------------------------------------ */
+const BASE = (() => {
+  if (!window.__C2C_404) {
+    const dir = location.pathname.replace(/[^/]*$/, '')
+    try { localStorage.setItem('c2c-base', dir) } catch {}
+    return dir
+  }
+  let saved = ''
+  try { saved = localStorage.getItem('c2c-base') || '' } catch {}
+  if (saved && location.pathname.startsWith(saved)) return saved
+  if (/\.github\.io$/i.test(location.hostname)) {
+    const seg = location.pathname.split('/').filter(Boolean)
+    return seg.length ? '/' + seg[0] + '/' : '/'
+  }
+  return '/'
+})()
+
 /* ------------------------------------------------------------------ *
  * Room code from URL (#r=<code>) + address-bar normalization
  * ------------------------------------------------------------------ */
@@ -512,7 +542,7 @@ const ROOM_CODE = parseRoomCode()
 // Any deep URL or junk is collapsed; a valid #r=code is preserved. replaceState =
 // no reload, so a typed "/README.md" silently lands on the app with a clean bar.
 try {
-  const want = ROOM_CODE ? '/#r=' + ROOM_CODE : '/'
+  const want = BASE + (ROOM_CODE ? '#r=' + ROOM_CODE : '')
   if (location.pathname + location.search + location.hash !== want) history.replaceState(null, '', want)
 } catch {}
 
@@ -521,8 +551,10 @@ try {
  * ------------------------------------------------------------------ */
 const CONFIG = {
   appId: 'chat-to-chat-p2p-v1',
-  // Default public room = the host. A share code switches to a private/topical room.
-  roomId: ROOM_CODE ? 'code:' + ROOM_CODE : (location.hostname || 'localhost'),
+  // Default public room = host (+ subpath on project sites, so each /repo/ is its
+  // own room). A share code switches to a private/topical room. A root deployment
+  // keeps the bare hostname so existing rooms aren't split by an update.
+  roomId: ROOM_CODE ? 'code:' + ROOM_CODE : ((location.hostname || 'localhost') + (BASE === '/' ? '' : BASE)),
   isDefaultRoom: !ROOM_CODE,
   roomCode: ROOM_CODE,
   // Curated high-uptime public Nostr relays (free, not owner-run). Pinning these
@@ -623,7 +655,12 @@ function colorOf(id) {
   return c
 }
 const initialOf = name => ((name || '?').trim()[0] || '?').toUpperCase()
-const validT = t => (typeof t === 'number' && isFinite(t)) ? Math.min(Math.max(t, 0), Date.now() + 60000) : Date.now()
+// clamp claimed timestamps to [now − 48h, now + 60s] so a peer can't pin
+// messages to the top of the timeline (where they'd evict first) or the future
+const validT = t => {
+  const now = Date.now()
+  return (typeof t === 'number' && isFinite(t)) ? Math.min(Math.max(t, now - 48 * 3600 * 1000), now + 60000) : now
+}
 function fmtTime(t) { return new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) }
 function relTime(t) {
   const s = Math.floor((Date.now() - t) / 1000)
@@ -860,7 +897,8 @@ function linkNode(url) {
   a.rel = 'noopener noreferrer nofollow'
   return a
 }
-const INLINE_RE = /(\*\*([^*]+)\*\*|`([^`]+)`|_([^_]+)_)/g
+// `(?<!\\)` lets a backslash escape the opening `_`, so ¯\_(ツ)_/¯ stays intact
+const INLINE_RE = /(\*\*([^*]+)\*\*|`([^`]+)`|(?<!\\)_([^_]+)_)/g
 function appendInline(el, text) {
   let last = 0, m
   INLINE_RE.lastIndex = 0
@@ -879,6 +917,13 @@ function appendInline(el, text) {
 }
 
 /* ----- reactions ---- */
+// A reaction must actually be emoji — otherwise a peer can pin arbitrary short
+// text ("chips") to anyone's message. Allow pictographs + the components that
+// glue sequences together (ZWJ, VS16, skin tones, flags), but require at least
+// one real pictograph/flag so plain digits or '#' don't pass.
+const EMOJI_ONLY_RE = /^[\p{Extended_Pictographic}\p{Emoji_Component}\u200D\uFE0F]+$/u
+const HAS_EMOJI_RE = /\p{Extended_Pictographic}|\p{Regional_Indicator}/u
+const validEmoji = s => typeof s === 'string' && !!s && s.length <= 8 && EMOJI_ONLY_RE.test(s) && HAS_EMOJI_RE.test(s)
 function reactionBar(key) {
   const map = reactions.get(key)
   if (!map || !map.size) return null
@@ -1091,24 +1136,39 @@ function addFileEntry(entry, fromSelf) {
   if (!seenIds.has(entry.id)) addEntry(entry)
   renderTimeline({stick})
 }
+// Update a visible progress bar in place — a 10 MB transfer fires hundreds of
+// progress events, and a full renderTimeline() per chunk freezes slow devices.
+let progRenderLast = 0
+function updateFileProgress(key, pct) {
+  const bar = messagesEl.querySelector(`.msg[data-key="${cssEsc(key)}"] .fileprog i`)
+  if (bar) { bar.style.width = Math.round(pct * 100) + '%'; return }
+  const now = Date.now()   // bar not in the DOM (rare) → throttled full render
+  if (now - progRenderLast > 500) { progRenderLast = now; renderTimeline({}) }
+}
 function onFileProgress(pct, peerId, metadata) {
   if (!metadata || typeof metadata.id !== 'string' || isMuted(peerId)) return
   if (typeof metadata.size === 'number' && metadata.size > CONFIG.maxFileBytes) return
   const key = keyOf(peerId, clampStr(metadata.id, 64))
   const e = findEntry(key)
-  if (e) { e.progress = pct }
-  else addEntry({kind: 'file', id: key, t: validT(metadata.t), peerId, name: nameOf(peerId), fileName: sanitize(metadata.name, 120) || 'file', fileType: clampStr(metadata.type, 80), fileSize: typeof metadata.size === 'number' ? metadata.size : 0, url: null, progress: pct})
+  if (e) { e.progress = pct; updateFileProgress(key, pct); return }
+  // each NEW transfer entry costs one slot in the 'file' flood budget, so a peer
+  // can't spam fabricated progress metadata into endless "Receiving…" rows
+  if (!allow(peerId, 'file')) return
+  addEntry({kind: 'file', id: key, t: validT(metadata.t), peerId, name: nameOf(peerId), fileName: sanitize(metadata.name, 120) || 'file', fileType: clampStr(metadata.type, 80), fileSize: typeof metadata.size === 'number' ? metadata.size : 0, url: null, progress: pct})
   renderTimeline({})
 }
 function onFileComplete(data, peerId, metadata) {
-  if (!metadata || typeof metadata.id !== 'string' || !allow(peerId, 'file') || isMuted(peerId)) return
-  const size = typeof metadata.size === 'number' ? metadata.size : (data && data.byteLength) || 0
-  if (size > CONFIG.maxFileBytes) return
+  if (!metadata || typeof metadata.id !== 'string' || isMuted(peerId)) return
+  // judge the size by the bytes actually received, not the peer's claim
+  const actual = (data && data.byteLength) || 0
+  if (actual > CONFIG.maxFileBytes || (typeof metadata.size === 'number' && metadata.size > CONFIG.maxFileBytes)) return
   const key = keyOf(peerId, clampStr(metadata.id, 64))
-  const url = URL.createObjectURL(new Blob([data], {type: isImageType(metadata.type) ? metadata.type : 'application/octet-stream'}))
   const e = findEntry(key)
-  if (e) { e.url = url; e.progress = 1; renderTimeline({stick: isNearBottom()}) }
-  else addFileEntry({kind: 'file', id: key, t: validT(metadata.t), peerId, name: nameOf(peerId), fileName: sanitize(metadata.name, 120) || 'file', fileType: clampStr(metadata.type, 80), fileSize: size, url, progress: 1}, false)
+  if (e && e.url) return                       // duplicate resend of the same id → ignore (no blob-URL leak)
+  if (!e && !allow(peerId, 'file')) return     // unseen transfer still counts against the budget
+  const url = URL.createObjectURL(new Blob([data], {type: isImageType(metadata.type) ? metadata.type : 'application/octet-stream'}))
+  if (e) { e.url = url; e.progress = 1; e.fileSize = actual || e.fileSize; renderTimeline({stick: isNearBottom()}) }
+  else addFileEntry({kind: 'file', id: key, t: validT(metadata.t), peerId, name: nameOf(peerId), fileName: sanitize(metadata.name, 120) || 'file', fileType: clampStr(metadata.type, 80), fileSize: actual, url, progress: 1}, false)
   announceMsg(`${nameOf(peerId)} sent ${isImageType(metadata.type) ? 'an image' : 'a file'}`)
   if (document.hidden) setUnread(unread + 1)
 }
@@ -1221,12 +1281,13 @@ function wireRoom(room) {
       const text = sanitize(m.text, CONFIG.maxMsgLen)
       if (!text) continue
       const author = clampStr(m.peerId, 64)
+      if (author === selfId) continue        // I'd already have my own messages — a "mine" I don't know is forged
       const key = keyOf(author, clampStr(m.id, 64))   // namespaced by claimed AUTHOR for cross-relayer dedupe
       if (addEntry({kind: 'msg', id: key, t: validT(m.t), peerId: author, name: sanitize(m.name, CONFIG.maxNameLen) || shortId(author), text, emote: !!m.emote, reply: parseReply(m.reply)})) added = true
       if (m.reacts && typeof m.reacts === 'object') {  // re-hydrate reaction counts
         for (const em of Object.keys(m.reacts).slice(0, 24)) {
-          const list = m.reacts[em]
-          if (Array.isArray(list)) list.slice(0, 60).forEach(pid => applyReaction(key, sanitize(em, 8), clampStr(pid, 64), true))
+          const list = m.reacts[em], emoji = sanitize(em, 8)
+          if (Array.isArray(list) && validEmoji(emoji)) list.slice(0, 60).forEach(pid => applyReaction(key, emoji, clampStr(pid, 64), true))
         }
       }
     }
@@ -1251,7 +1312,9 @@ function wireRoom(room) {
     if (!d || typeof d.target !== 'string' || !allow(peerId, 'react')) return
     if (isMuted(peerId)) return              // muted peers' reactions don't register
     if (!seenIds.has(d.target)) return       // ignore reactions to messages we don't have
-    applyReaction(d.target, sanitize(d.emoji, 8), peerId, !!d.on)
+    const em = sanitize(d.emoji, 8)
+    if (!validEmoji(em)) return              // emoji only — no text smuggled into chips
+    applyReaction(d.target, em, peerId, !!d.on)
   }
   file.onMessage = (data, {peerId, metadata}) => onFileComplete(data, peerId, metadata)
   file.onReceiveProgress = (pct, {peerId, metadata}) => onFileProgress(pct, peerId, metadata)
@@ -1581,7 +1644,7 @@ emojiGrid.addEventListener('keydown', e => {
 /* ------------------------------------------------------------------ *
  * Rooms / share code
  * ------------------------------------------------------------------ */
-function shareUrl(code = CONFIG.roomCode) { return location.origin + (code ? '/#r=' + code : '/') }
+function shareUrl(code = CONFIG.roomCode) { return location.origin + BASE + (code ? '#r=' + code : '') }
 function copyText(text, btn, restore) {
   const done = ok => { if (btn) { btn.textContent = ok ? '✓ Copied' : 'Copy failed'; setTimeout(() => { btn.textContent = restore }, 1400) } }
   try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)) } catch { done(false) }
@@ -1605,7 +1668,7 @@ function gotoRoom(name, pass) {
   if (!n || !pass) return
   try { sessionStorage.setItem('c2c-pass-' + n, pass) } catch {}
   // a hash-only change does NOT reload the SPA, so force a reload into the new room
-  history.replaceState(null, '', '/#r=' + n)
+  history.replaceState(null, '', BASE + '#r=' + n)
   location.reload()
 }
 function showMeshBanner() {
@@ -1761,7 +1824,7 @@ roomGoBtn.addEventListener('click', () => {
 })
 roomNameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomPassInput.focus() } })
 roomPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomGoBtn.click() } })
-roomPublicBtn.addEventListener('click', () => { history.replaceState(null, '', '/'); location.reload() })
+roomPublicBtn.addEventListener('click', () => { history.replaceState(null, '', BASE); location.reload() })
 
 themeBtn.addEventListener('click', cycleTheme)
 blurBtn.addEventListener('click', toggleBlur)
