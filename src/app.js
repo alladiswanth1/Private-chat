@@ -83,7 +83,7 @@ const CONFIG = {
   idleMs: 60000,
   gapDividerMs: 5 * 60 * 1000,
   // per-channel inbound flood budgets (count within window ms)
-  flood: { msg: [20, 2000], name: [6, 4000], typing: [40, 2000], react: [40, 2000], presence: [20, 4000], file: [6, 12000] },
+  flood: { msg: [20, 2000], name: [6, 4000], typing: [40, 2000], react: [40, 2000], presence: [20, 4000], file: [6, 12000], attq: [4, 10000], atth: [8, 10000] },
 }
 
 /* ------------------------------------------------------------------ *
@@ -692,6 +692,118 @@ function sendFile(file) {
 function revokeAllFileUrls() { for (const e of timeline) if (e.kind === 'file' && e.url) URL.revokeObjectURL(e.url) }
 
 /* ------------------------------------------------------------------ *
+ * Verifiable hearsay — tamper-evident history hand-off.
+ *
+ * Every message carries the SHA-256 hashes of the most recent messages its
+ * sender held (`prev`), weaving a causal hash-DAG as the room talks. A
+ * newcomer recomputes the hashes of the history burst (so the elected sender
+ * can't silently alter or drop anything inside it) and then asks the OTHER
+ * peers for their current DAG heads. If an independent witness's head chains
+ * down to a message inside the burst, the history is confirmed by someone
+ * with no stake in the hand-off. Forging history now requires every present
+ * peer to collude, instead of just winning the lowest-id election.
+ *
+ * Hashes are computed from the wire values (claimed t, sanitized text), so
+ * every peer derives identical hashes without trusting each other's clocks.
+ * ------------------------------------------------------------------ */
+const HASH_RE = /^[0-9a-f]{64}$/
+const sha256hex = async s => {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+const validPrev = p => Array.isArray(p) ? p.filter(x => typeof x === 'string' && HASH_RE.test(x)).slice(0, 3) : []
+const validHeads = h => Array.isArray(h) ? h.filter(x => typeof x === 'string' && HASH_RE.test(x)).slice(0, 8) : []
+const msgCanon = e => JSON.stringify([e.peerId, rawIdOf(e.id), e.wt, e.text, e.emote ? 1 : 0, (e.reply && e.reply.key) || '', e.prev])
+
+const msgHashByKey = new Map()   // timeline key -> hash
+const hashMeta = new Map()       // hash -> {key, prev, inBurst}
+const dagReferenced = new Set()  // hashes referenced as someone's prev
+const dagHeads = new Set()       // known hashes nothing references yet
+const currentHeads = () => [...dagHeads].slice(-6)
+
+async function recordMsgHash(entry, inBurst) {
+  const h = await sha256hex(msgCanon(entry))
+  const known = hashMeta.get(h)
+  if (known) { if (inBurst) known.inBurst = true; return h }
+  msgHashByKey.set(entry.id, h)
+  hashMeta.set(h, {key: entry.id, prev: entry.prev, inBurst: !!inBurst})
+  for (const p of entry.prev) { dagReferenced.add(p); dagHeads.delete(p) }
+  if (!dagReferenced.has(h)) dagHeads.add(h)
+  if (hashMeta.size > 700) {   // bound the substrate on marathon sessions
+    for (const k of hashMeta.keys()) {
+      const m = hashMeta.get(k)
+      msgHashByKey.delete(m.key); hashMeta.delete(k); dagHeads.delete(k)
+      if (hashMeta.size <= 600) break
+    }
+  }
+  evalAttestation()            // a late-arriving link may complete a witness chain
+  return h
+}
+function resetDag() { msgHashByKey.clear(); hashMeta.clear(); dagReferenced.clear(); dagHeads.clear() }
+
+// does this head chain down (via prev links) to a message from the burst?
+function connectsToBurst(head) {
+  const stack = [head], seen = new Set()
+  while (stack.length) {
+    const h = stack.pop()
+    if (seen.has(h) || seen.size > 400) continue
+    seen.add(h)
+    const m = hashMeta.get(h)
+    if (!m) continue                  // unknown link — may resolve when it arrives live
+    if (m.inBurst) return true
+    for (const p of m.prev) stack.push(p)
+  }
+  return false
+}
+
+// Ask up to 5 peers who did NOT hand us the history to vouch for it. The burst
+// often lands before the rest of the mesh has connected, so give discovery a
+// short grace window before deciding nobody else was here.
+let attest = null                    // {waiting: Map(peerId -> heads[]|null), timer, settled, t0}
+function startAttestation() {
+  if (attest || !actions) return
+  attest = {waiting: new Map(), settled: false, t0: Date.now()}
+  attest.timer = setInterval(() => {
+    if (!attest) return
+    const witnesses = [...peers.keys()].filter(id => !histAcceptedFrom.has(id)).slice(0, 5)
+    if (witnesses.length) {
+      clearInterval(attest.timer)
+      attest.waiting = new Map(witnesses.map(id => [id, null]))
+      for (const id of witnesses) actions.attq.send(1, {target: id})
+      attest.timer = setTimeout(settleAttestation, 10000)
+    } else if (Date.now() - attest.t0 > 8000) {
+      clearInterval(attest.timer)
+      attest = null
+      addSystem('History came from the only person who could hand it over — no one else was here to cross-check it.')
+    }
+  }, 400)
+}
+function evalAttestation() {        // settle early only on a clean positive
+  if (!attest || attest.settled) return
+  let allReplied = true, confirmed = 0
+  for (const hs of attest.waiting.values()) {
+    if (hs === null) { allReplied = false; continue }
+    if (hs.length && hs.some(connectsToBurst)) confirmed++
+  }
+  if (confirmed && allReplied) settleAttestation()
+}
+function settleAttestation() {
+  if (!attest || attest.settled) return
+  attest.settled = true; clearTimeout(attest.timer)
+  let confirmed = 0, replied = 0
+  for (const hs of attest.waiting.values()) {
+    if (hs === null || !hs.length) continue   // silent, or nothing to vouch with
+    replied++
+    if (hs.some(connectsToBurst)) confirmed++
+  }
+  if (confirmed) addSystem(`✓ History verified — independently confirmed by ${confirmed} other ${confirmed === 1 ? 'person' : 'people'} here${replied > confirmed ? ` (${replied - confirmed} couldn’t confirm it)` : ''}.`)
+  else if (replied) addSystem('⚠ No one else here could confirm the history you were handed — treat it as unconfirmed.')
+  else addSystem('History couldn’t be cross-checked — no one else here had anything to vouch with.')
+  attest = null
+}
+function cancelAttestation() { if (attest) { clearTimeout(attest.timer); attest = null } }
+
+/* ------------------------------------------------------------------ *
  * Networking
  * ------------------------------------------------------------------ */
 function startChat() {
@@ -719,6 +831,7 @@ function reconnect() {
   room = null; actions = null
   for (const t of typingTimers.values()) clearTimeout(t)
   typingTimers.clear(); peers.clear(); histAcceptedFrom.clear(); floodState.clear()
+  cancelAttestation()   // keep the DAG (timeline survives a reconnect), drop the pending vote
   prevRelays = 0; noPeerSince = 0
   renderRoster(); renderTyping(); addSystem('Reconnecting…')
   startChat()
@@ -734,6 +847,7 @@ function leaveAndReset() {
   typingTimers.clear(); peers.clear(); floodState.clear(); histAcceptedFrom.clear()
   revokeAllFileUrls()
   reactions.clear(); seenIds.clear(); timeline.length = 0
+  cancelAttestation(); resetDag()
   prevRelays = 0; noPeerSince = 0
 }
 
@@ -756,7 +870,16 @@ function wireRoom(room) {
   const react = room.makeAction('react')
   const presence = room.makeAction('presence')
   const file = room.makeAction('file')
-  actions = {msg, name, typing, hist, histReq, react, presence, file}
+  const attq = room.makeAction('attq')   // "show me your DAG heads"
+  const atth = room.makeAction('atth')   // "here they are"
+  actions = {msg, name, typing, hist, histReq, react, presence, file, attq, atth}
+
+  attq.onMessage = (_d, {peerId}) => { if (allow(peerId, 'attq')) atth.send({heads: currentHeads()}, {target: peerId}) }
+  atth.onMessage = (d, {peerId}) => {
+    if (!allow(peerId, 'atth') || !attest || attest.settled || !attest.waiting.has(peerId)) return
+    attest.waiting.set(peerId, validHeads(d && d.heads))
+    evalAttestation()
+  }
 
   msg.onMessage = (data, {peerId}) => {
     if (!data || typeof data.id !== 'string' || !allow(peerId, 'msg')) return
@@ -765,15 +888,19 @@ function wireRoom(room) {
     if (typeof data.name === 'string') setPeerName(peerId, data.name, true)
     clearPeerTyping(peerId)
     // id namespaced by the TRUSTED transport peerId — a peer can't claim another's id-space
-    addMessage({
+    const wt = (typeof data.t === 'number' && isFinite(data.t)) ? data.t : 0   // wire t — what everyone hashes
+    const entry = {
       id: keyOf(peerId, clampStr(data.id, 64)),
       t: validT(data.t),
+      wt,
       peerId,
       name: nameOf(peerId),
       text,
       emote: !!data.emote,
       reply: parseReply(data.reply),
-    }, false)
+      prev: validPrev(data.prev),
+    }
+    if (addMessage(entry, false)) recordMsgHash(entry)
   }
 
   hist.onMessage = (arr, {peerId}) => {
@@ -783,6 +910,7 @@ function wireRoom(room) {
     if (peerId !== lowestPeer()) return
     histAcceptedFrom.add(peerId)            // and only one burst from them
     let added = false
+    const hashing = []
     for (const m of arr.slice(0, CONFIG.historyShare)) {
       if (!m || typeof m.id !== 'string' || typeof m.peerId !== 'string') continue
       const text = sanitize(m.text, CONFIG.maxMsgLen)
@@ -790,7 +918,10 @@ function wireRoom(room) {
       const author = clampStr(m.peerId, 64)
       if (author === selfId) continue        // I'd already have my own messages — a "mine" I don't know is forged
       const key = keyOf(author, clampStr(m.id, 64))   // namespaced by claimed AUTHOR for cross-relayer dedupe
-      if (addEntry({kind: 'msg', id: key, t: validT(m.t), peerId: author, name: sanitize(m.name, CONFIG.maxNameLen) || shortId(author), text, emote: !!m.emote, reply: parseReply(m.reply)})) added = true
+      const wt = (typeof m.t === 'number' && isFinite(m.t)) ? m.t : 0
+      const entry = {kind: 'msg', id: key, t: validT(m.t), wt, peerId: author, name: sanitize(m.name, CONFIG.maxNameLen) || shortId(author), text, emote: !!m.emote, reply: parseReply(m.reply), prev: validPrev(m.prev)}
+      if (addEntry(entry)) added = true
+      hashing.push(recordMsgHash(entry, true))   // recompute — the relayer can't alter what's inside the chain
       if (m.reacts && typeof m.reacts === 'object') {  // re-hydrate reaction counts
         for (const em of Object.keys(m.reacts).slice(0, 24)) {
           const list = m.reacts[em], emoji = sanitize(em, 8)
@@ -799,6 +930,7 @@ function wireRoom(room) {
       }
     }
     if (added) renderTimeline({stick: true})
+    if (hashing.length) Promise.all(hashing).then(startAttestation)   // then ask the others to vouch
   }
 
   // a newcomer who got no history asks for it; the next-lowest peer answers
@@ -863,8 +995,10 @@ function serializeReacts(key) {
   return Object.keys(o).length ? o : null
 }
 function sendHistoryTo(peerId) {
+  // forward the WIRE values (claimed t, prev links) so the receiver recomputes
+  // the exact same hashes the original sender's message produced
   const recent = timeline.filter(e => e.kind === 'msg').slice(-CONFIG.historyShare)
-    .map(e => ({id: rawIdOf(e.id), t: e.t, peerId: e.peerId, name: e.name, text: e.text, emote: e.emote, reply: e.reply, reacts: serializeReacts(e.id)}))
+    .map(e => ({id: rawIdOf(e.id), t: e.wt ?? e.t, peerId: e.peerId, name: e.name, text: e.text, emote: e.emote, reply: e.reply, prev: e.prev || [], reacts: serializeReacts(e.id)}))
   if (recent.length && actions) actions.hist.send(recent, {target: peerId})
 }
 const rawIdOf = key => { const i = key.indexOf('::'); return i < 0 ? key : key.slice(i + 2) }
@@ -981,9 +1115,12 @@ function sendMessage() {
   if (!text || !actions) return
   if (text[0] === '/' && handleSlash(text)) { inputEl.value = ''; stopTyping(); updateSendBtn(); return }
   const rawId = newRawId()
-  const entry = {id: keyOf(selfId, rawId), t: Date.now(), peerId: selfId, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null}
-  actions.msg.send({id: rawId, t: entry.t, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null})
+  const prev = currentHeads().slice(-3)   // weave this message into the room's hash-DAG
+  const entry = {id: keyOf(selfId, rawId), t: Date.now(), peerId: selfId, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null, prev}
+  entry.wt = entry.t
+  actions.msg.send({id: rawId, t: entry.t, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null, prev})
   addMessage(entry, true)
+  recordMsgHash(entry)
   inputEl.value = ''; cancelReply(); stopTyping(); updateSendBtn(); inputEl.focus()
 }
 
@@ -1002,7 +1139,12 @@ function handleSlash(text) {
     }
     case 'me': {
       const text = sanitize(arg, CONFIG.maxMsgLen)
-      if (text) { const rawId = newRawId(), id = keyOf(selfId, rawId), t = Date.now(); actions.msg.send({id: rawId, t, name: myName, text, emote: true}); addMessage({id, t, peerId: selfId, name: myName, text, emote: true}, true) }
+      if (text) {
+        const rawId = newRawId(), id = keyOf(selfId, rawId), t = Date.now(), prev = currentHeads().slice(-3)
+        const entry = {id, t, wt: t, peerId: selfId, name: myName, text, emote: true, prev}
+        actions.msg.send({id: rawId, t, name: myName, text, emote: true, prev})
+        addMessage(entry, true); recordMsgHash(entry)
+      }
       return true
     }
     case 'who': addSystem('Here now: ' + [myName + ' (you)', ...[...peers.values()].map(p => p.name).filter(Boolean)].join(', ')); return true

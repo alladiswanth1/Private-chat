@@ -166,6 +166,13 @@ database.
   minimal markdown** (`**bold**`, `_italic_`, `` `code` ``) rendered as DOM nodes only.
 - **Live history hand-off** — a newcomer is handed the last ~30 messages (and their
   reactions) by the single elected peer already in the room.
+- **Verifiable hearsay** — every message carries SHA-256 links to the messages before
+  it, weaving a causal hash-DAG as the room talks. A newcomer recomputes the hashes of
+  the handed-off history (the relayer can't silently alter or drop anything inside the
+  chain) and then asks the *other* people present to vouch: if an independent peer's
+  latest hashes chain down into the burst, the room shows
+  *"✓ History verified — independently confirmed by N other people here."*
+  Forging history now requires everyone present to collude, not just one elected peer.
 - **Private rooms by custom name + required password** (`#r=<name>`, cryptographically gated), and an
   overflow-room suggestion when a mesh gets large.
 - **Peer-to-peer file & image sharing** — attach (📎), drag-and-drop onto the chat, or
@@ -205,9 +212,11 @@ database.
   id ordering: name-collision resolution (higher id yields) and history-sender
   election (lowest id sends). A determined attacker could regenerate ids until
   they hold a very low one, letting them win name clashes or get elected to hand
-  newcomers a forged history (self-impersonation is rejected, reply quotes and
-  live messages never trust claimed identity, and the `#id` badge always exposes
-  same-named peers — but history from before you joined is ultimately hearsay).
+  newcomers history. The hash-DAG cross-check (see *Verifiable hearsay*) means a
+  forged history is only believed if **every** other person present colludes (or
+  nobody else is there to vouch — the room tells you which); self-impersonation
+  is rejected, reply quotes and live messages never trust claimed identity, and
+  the `#id` badge always exposes same-named peers.
 - The **10 MB file cap is enforced on what gets kept/shown**, not on the wire: a
   hostile peer could still stream you junk bytes before the cap rejects it. Mute
   (or leave) cuts them off.
