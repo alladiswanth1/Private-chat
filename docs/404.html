@@ -5,7 +5,7 @@
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-zAcLQqlQoxpIO/P8JH7s5oPfa2pbyOFsKGmdFnnvOsw=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.snort.social wss://nostr.wine wss://relay.nostr.bg wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-6IOARaoJG1HPo8jhy9i9PnDRQEqUQdTaehpT1BU4sL0=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />
@@ -624,14 +624,33 @@ const CONFIG = {
   roomCode: ROOM_CODE,
   // Curated high-uptime public Nostr relays (free, not owner-run). Pinning these
   // (vs Trystero's churny ~46-relay default) makes peer discovery deterministic.
+  // (Trystero connects to ALL custom urls — redundancy only trims its default
+  // list — so every client shares the same relay set and discovery overlaps.)
   relayUrls: [
     'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band',
-    'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.snort.social',
-    'wss://nostr.wine', 'wss://relay.nostr.bg', 'wss://relay.0xchat.com',
+    'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.0xchat.com',
     'wss://nostr.bitcoiner.social', 'wss://relay.nostr.net', 'wss://offchain.pub',
   ],
   relayRedundancy: 10,
-  turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
+  // Free public TURN (Open Relay Project, static credentials — these are the
+  // published shared ones, not a secret). STUN alone can't cross symmetric NATs
+  // (most mobile carriers), which makes peers on different networks fail AFTER
+  // discovery. ICE only uses TURN when a direct path fails; traffic stays E2EE.
+  // Swap for your own TURN here if you have one (see README → Connectivity).
+  turnConfig: [
+    {
+      urls: [
+        'turn:staticauth.openrelay.metered.ca:80',
+        'turn:staticauth.openrelay.metered.ca:443',
+        'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject', credential: 'openrelayproject',
+    },
+    {
+      urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443?transport=tcp'],
+      username: 'openrelayproject', credential: 'openrelayproject',
+    },
+  ],
   maxNameLen: 24,
   maxMsgLen: 4000,
   minPassLen: 8,   // room passwords become key material — refuse trivially guessable ones
