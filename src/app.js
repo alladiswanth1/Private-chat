@@ -73,14 +73,33 @@ const CONFIG = {
   roomCode: ROOM_CODE,
   // Curated high-uptime public Nostr relays (free, not owner-run). Pinning these
   // (vs Trystero's churny ~46-relay default) makes peer discovery deterministic.
+  // (Trystero connects to ALL custom urls — redundancy only trims its default
+  // list — so every client shares the same relay set and discovery overlaps.)
   relayUrls: [
     'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band',
-    'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.snort.social',
-    'wss://nostr.wine', 'wss://relay.nostr.bg', 'wss://relay.0xchat.com',
+    'wss://relay.primal.net', 'wss://nostr.mom', 'wss://relay.0xchat.com',
     'wss://nostr.bitcoiner.social', 'wss://relay.nostr.net', 'wss://offchain.pub',
   ],
   relayRedundancy: 10,
-  turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
+  // Free public TURN (Open Relay Project, static credentials — these are the
+  // published shared ones, not a secret). STUN alone can't cross symmetric NATs
+  // (most mobile carriers), which makes peers on different networks fail AFTER
+  // discovery. ICE only uses TURN when a direct path fails; traffic stays E2EE.
+  // Swap for your own TURN here if you have one (see README → Connectivity).
+  turnConfig: [
+    {
+      urls: [
+        'turn:staticauth.openrelay.metered.ca:80',
+        'turn:staticauth.openrelay.metered.ca:443',
+        'turn:staticauth.openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject', credential: 'openrelayproject',
+    },
+    {
+      urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443?transport=tcp'],
+      username: 'openrelayproject', credential: 'openrelayproject',
+    },
+  ],
   maxNameLen: 24,
   maxMsgLen: 4000,
   minPassLen: 8,   // room passwords become key material — refuse trivially guessable ones

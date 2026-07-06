@@ -113,11 +113,18 @@ room and connect to each other.
 
 ---
 
-## Connectivity & TURN (optional)
+## Connectivity & TURN
 
-Built-in STUN handles most networks. A small share of users behind strict/symmetric
-NATs (some corporate or mobile networks) can't form a direct P2P link. To cover them,
-add a **TURN** relay in `src/app.js` → `CONFIG.turnConfig` (then rebuild):
+Built-in STUN handles most networks, but users behind strict/symmetric NATs (most
+mobile carriers, some corporate networks) can't form a direct P2P link with STUN
+alone — they discover each other and then the connection fails. To cover them,
+`CONFIG.turnConfig` ships with the **Open Relay Project's free public TURN**
+(static shared credentials, made for serverless sites). ICE only routes through
+TURN when a direct path is impossible, and the traffic stays end-to-end encrypted
+either way.
+
+For heavier traffic or more reliability, swap in your own TURN relay in
+`src/app.js` → `CONFIG.turnConfig` (then rebuild):
 
 ```js
 turnConfig: [
@@ -125,9 +132,10 @@ turnConfig: [
 ],
 ```
 
-Free/cheap TURN options: [Cloudflare TURN](https://developers.cloudflare.com/calls/turn/)
-(free tier) or [Open Relay](https://www.metered.ca/stun-turn). Traffic only flows
-through TURN for peers that can't connect directly, and stays end-to-end encrypted.
+Options: [Open Relay / Metered](https://www.metered.ca/stun-turn) (bigger free
+tier with an account) or any self-hosted [coturn](https://github.com/coturn/coturn).
+Note: Cloudflare TURN issues short-lived credentials via API, which needs a server —
+not usable from a purely static site.
 
 ---
 
