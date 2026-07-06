@@ -76,6 +76,7 @@ const CONFIG = {
   turnConfig: [], // see README → Connectivity; left empty to stay dependency-free
   maxNameLen: 24,
   maxMsgLen: 4000,
+  minPassLen: 8,   // room passwords become key material — refuse trivially guessable ones
   maxFileBytes: 10 * 1024 * 1024,   // 10 MB cap per file (sent P2P, never stored)
   maxRendered: 400,
   historyShare: 30,
@@ -103,7 +104,7 @@ const peopleToggle = $('#people-toggle'), peopleClose = $('#people-close')
 const rulesToggle = $('#rules-toggle'), rulesClose = $('#rules-close')
 const scrim = $('#scrim'), meName = $('#me-name'), meDot = $('#me-dot')
 const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
-const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
+const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomErrEl = $('#room-err'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
 const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 const renameModal = $('#rename'), renameForm = $('#rename-form'), renameMsg = $('#rename-msg'), renameInput = $('#rename-input'), renameErr = $('#rename-err')
@@ -345,8 +346,15 @@ function msgNode(e, grouped) {
   const rbar = reactionBar(e.id)
   if (rbar) stack.appendChild(rbar)
 
-  // hover/long-press toolbar (react + reply)
+  // hover toolbar (react + reply); on touch layouts it's shown by tapping the
+  // message instead of hovering, so it never sits permanently over the text
   stack.appendChild(msgTools(e))
+  row.addEventListener('click', ev => {
+    if (!isDrawer() || ev.target.closest('.msgtools, a, .react, .replyquote')) return
+    const open = messagesEl.querySelector('.msg.tools-open')
+    if (open && open !== row) open.classList.remove('tools-open')
+    row.classList.toggle('tools-open')
+  })
 
   row.appendChild(stack)
   return row
@@ -796,7 +804,8 @@ function settleAttestation() {
     replied++
     if (hs.some(connectsToBurst)) confirmed++
   }
-  if (confirmed) addSystem(`✓ History verified — independently confirmed by ${confirmed} other ${confirmed === 1 ? 'person' : 'people'} here${replied > confirmed ? ` (${replied - confirmed} couldn’t confirm it)` : ''}.`)
+  // "connections", not "people": peer ids are free, so one person can be several
+  if (confirmed) addSystem(`✓ History verified — independently confirmed by ${confirmed} other ${confirmed === 1 ? 'connection' : 'connections'} here${replied > confirmed ? ` (${replied - confirmed} couldn’t confirm it)` : ''}.`)
   else if (replied) addSystem('⚠ No one else here could confirm the history you were handed — treat it as unconfirmed.')
   else addSystem('History couldn’t be cross-checked — no one else here had anything to vouch with.')
   attest = null
@@ -806,11 +815,24 @@ function cancelAttestation() { if (attest) { clearTimeout(attest.timer); attest 
 /* ------------------------------------------------------------------ *
  * Networking
  * ------------------------------------------------------------------ */
-function startChat() {
+// Stretch the room password before it becomes key material. Trystero alone
+// hashes it once (SHA-256), which a relay eavesdropper can brute-force offline
+// at GPU speed; PBKDF2 with a room-bound salt makes each guess ~310k times
+// more expensive. Every peer derives the same value, so peers stay compatible.
+async function stretchPass(pass) {
+  const enc = new TextEncoder()
+  const km = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits(
+    {name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode('c2c-kdf-v1|' + CONFIG.appId + '|' + CONFIG.roomId), iterations: 310000},
+    km, 256)
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function startChat() {
   try {
     const cfg = {appId: CONFIG.appId, relayConfig: {urls: CONFIG.relayUrls, redundancy: CONFIG.relayRedundancy}}
     if (CONFIG.turnConfig.length) cfg.turnConfig = CONFIG.turnConfig
-    if (myPass) cfg.password = myPass
+    if (myPass) cfg.password = await stretchPass(myPass)
     room = joinRoom(cfg, CONFIG.roomId)
     wireRoom(room)
     updateStatusLoop()
@@ -885,7 +907,11 @@ function wireRoom(room) {
     if (!data || typeof data.id !== 'string' || !allow(peerId, 'msg')) return
     const text = sanitize(data.text, CONFIG.maxMsgLen)
     if (!text) return
-    if (typeof data.name === 'string') setPeerName(peerId, data.name, true)
+    if (typeof data.name === 'string') {
+      // a RENAME smuggled through the busier msg channel still pays the name budget
+      const p = peers.get(peerId), n = sanitize(data.name, CONFIG.maxNameLen).trim()
+      if (p && n && (!p.name || p.name === n || allow(peerId, 'name'))) setPeerName(peerId, n)
+    }
     clearPeerTyping(peerId)
     // id namespaced by the TRUSTED transport peerId — a peer can't claim another's id-space
     const wt = (typeof data.t === 'number' && isFinite(data.t)) ? data.t : 0   // wire t — what everyone hashes
@@ -925,7 +951,8 @@ function wireRoom(room) {
       if (m.reacts && typeof m.reacts === 'object') {  // re-hydrate reaction counts
         for (const em of Object.keys(m.reacts).slice(0, 24)) {
           const list = m.reacts[em], emoji = sanitize(em, 8)
-          if (Array.isArray(list) && validEmoji(emoji)) list.slice(0, 60).forEach(pid => applyReaction(key, emoji, clampStr(pid, 64), true))
+          // never attribute a handed-off reaction to MYSELF — that would be forged
+          if (Array.isArray(list) && validEmoji(emoji)) list.slice(0, 60).forEach(pid => { const id = clampStr(pid, 64); if (id !== selfId) applyReaction(key, emoji, id, true) })
         }
       }
     }
@@ -950,7 +977,8 @@ function wireRoom(room) {
   react.onMessage = (d, {peerId}) => {
     if (!d || typeof d.target !== 'string' || !allow(peerId, 'react')) return
     if (isMuted(peerId)) return              // muted peers' reactions don't register
-    if (!seenIds.has(d.target)) return       // ignore reactions to messages we don't have
+    const target = findEntry(d.target)
+    if (!target || target.kind !== 'msg') return   // only real, present messages take reactions
     const em = sanitize(d.emoji, 8)
     if (!validEmoji(em)) return              // emoji only — no text smuggled into chips
     applyReaction(d.target, em, peerId, !!d.on)
@@ -1460,6 +1488,8 @@ inputEl.addEventListener('paste', e => {
 
 statusBtn.addEventListener('click', e => { e.stopPropagation(); toggleStatusPanel() })
 document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) statusPanel.hidden = true })
+// tap-away closes a touch-opened message toolbar
+document.addEventListener('click', e => { const open = messagesEl.querySelector('.msg.tools-open'); if (open && !open.contains(e.target)) open.classList.remove('tools-open') })
 
 roomsBtn.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden ? openRoomsPanel() : (roomsPanel.hidden = true) })
 document.addEventListener('click', e => { if (!roomsPanel.hidden && !roomsPanel.contains(e.target) && !roomsBtn.contains(e.target)) roomsPanel.hidden = true })
@@ -1468,9 +1498,13 @@ roomsCopyName.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyT
 roomGoBtn.addEventListener('click', () => {
   const n = normName(roomNameInput.value), pass = roomPassInput.value.trim()
   if (!n) { roomNameInput.focus(); return }
-  if (!pass) { roomPassInput.focus(); return }
+  if (pass.length < CONFIG.minPassLen) {
+    roomErrEl.textContent = pass ? `Use at least ${CONFIG.minPassLen} characters — the password becomes the room's encryption key.` : 'A password is required.'
+    roomErrEl.hidden = false; roomPassInput.focus(); return
+  }
   gotoRoom(n, pass)
 })
+roomPassInput.addEventListener('input', () => { roomErrEl.hidden = true })
 roomNameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomPassInput.focus() } })
 roomPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomGoBtn.click() } })
 roomPublicBtn.addEventListener('click', () => { history.replaceState(null, '', BASE); location.reload() })
@@ -1532,7 +1566,7 @@ function revealApp() {
 // Best-effort pre-entry uniqueness: join, discover present peers for a short
 // window (bailing early on a clash), reject if the name is taken.
 async function joinWithNameCheck() {
-  startChat()
+  await startChat()
   if (!room) { revealApp(); return true }   // connection failed → let them in to see the error
   // Block instantly on a clash. Otherwise decide "free" as soon as we're confident:
   // connected peers are all named & clean, or relays are up with no peers after a
@@ -1570,8 +1604,12 @@ function boot() {
   if (CONFIG.isDefaultRoom) { roomChip.hidden = true; gateRoomLabel.textContent = 'the public room' }
   else { roomChipName.textContent = '#' + CONFIG.roomCode; roomChip.hidden = false; gateRoomLabel.textContent = 'private room #' + CONFIG.roomCode; gatePassWrap.hidden = false }
 
-  // prefilled password (set when navigating from "new room")
-  try { const p = sessionStorage.getItem('c2c-pass-' + CONFIG.roomCode); if (p) { myPass = p; gatePass.value = p } } catch {}
+  // prefilled password (set when navigating from "new room") — consumed once,
+  // then wiped so the plaintext doesn't linger in sessionStorage for the tab's life
+  try {
+    const k = 'c2c-pass-' + CONFIG.roomCode, p = sessionStorage.getItem(k)
+    if (p) { myPass = p; gatePass.value = p; sessionStorage.removeItem(k) }
+  } catch {}
 
   let saved = ''
   try { saved = localStorage.getItem('c2c-name') || '' } catch {}
@@ -1594,6 +1632,10 @@ function boot() {
     if (!CONFIG.isDefaultRoom) {
       myPass = gatePass.value.trim()
       if (!myPass) { gatePass.focus(); gatePass.placeholder = '⚠ password required to enter this private room'; return }
+      if (myPass.length < CONFIG.minPassLen) {
+        gateErr.textContent = `Room passwords are at least ${CONFIG.minPassLen} characters — check it and try again.`
+        gateErr.hidden = false; gatePass.focus(); return
+      }
     }
     gateErr.hidden = true
     setMyName(n); renderRoster()
