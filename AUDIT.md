@@ -20,6 +20,29 @@ process items. Ranked list below.
 
 ---
 
+## Fix status (2026-07-06, same branch)
+
+Addressed after the audit, in the follow-up hardening/UI commit:
+
+- **M1 — fixed.** Room passwords are now stretched client-side (PBKDF2-SHA-256,
+  310k iterations, salted with app + room id) before Trystero derives the channel
+  key; a minimum length of 8 is enforced at the gate and in the Rooms panel, and
+  the README copy no longer overstates weak-password protection.
+- **M2 — addressed (wording).** The in-app verified line and README now say
+  "connections" and spell out that one person can run several of them.
+- **L1 — fixed.** History reaction re-hydration skips any pid claiming to be you.
+- **L2 — fixed.** A rename arriving on the `msg` channel now pays the `name`
+  flood budget.
+- **L3 — fixed.** Reactions only apply to entries that exist in the timeline
+  with `kind === 'msg'`.
+- **L4 — fixed.** The prefilled room password is wiped from `sessionStorage`
+  immediately after being read at boot.
+- **L5 — fixed.** `script-src` now carries build-computed sha256 hashes of the
+  three inline scripts instead of `'unsafe-inline'`.
+- **L6, P1, P2 — still open** (vendor provenance note, CI sync check, LICENSE).
+
+---
+
 ## Findings
 
 ### M1 · Private-room passwords are brute-forceable offline (weak KDF)

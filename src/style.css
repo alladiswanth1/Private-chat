@@ -169,9 +169,12 @@ button { font-family: inherit; color: inherit; }
 .share-b:hover { border-color: var(--accent); background: var(--panel-3); box-shadow: var(--glow); }
 .share-new { width: 100%; margin-top: 8px; flex: none; }
 .rooms-lbl { font-size: 13px; }
-.pop-h.mt { margin-top: 16px; }
+/* section spacer for pop-h — NOT class "mt" (that's the message-tools button) */
+.pop-h.pop-sect { margin-top: 16px; }
 .room-input { width: 100%; margin-bottom: 8px; padding: 9px 12px; font-size: 14px; color: var(--txt); background: color-mix(in srgb, var(--bg) 65%, transparent); border: 1px solid var(--line); border-radius: 10px; outline: none; transition: border-color .15s, box-shadow .15s; }
 .room-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(54,214,255,.18); }
+.room-err { margin: 0 2px 8px; font-size: 12px; font-weight: 600; color: var(--danger); }
+.room-err[hidden] { display: none; }
 
 /* banner */
 .banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 14px; background: color-mix(in srgb, var(--warn) 14%, var(--bg-2)); border-bottom: 1px solid var(--line); font-size: 13px; color: var(--txt); }
@@ -348,9 +351,11 @@ button { font-family: inherit; color: inherit; }
   .mobile-only { display: inline-flex; } .headline { font-size: 13px; letter-spacing: 1.6px; } .mechip { display: none; } .rooms-lbl { display: none; }
   .roomchip { max-width: 96px; }
   .iconpill { min-height: 40px; min-width: 40px; justify-content: center; padding: 8px 12px; }
-  .side { position: absolute; top: 0; bottom: 0; width: min(290px,84vw); z-index: 40; background: color-mix(in srgb, var(--bg-2) 96%, transparent); backdrop-filter: blur(18px); box-shadow: var(--shadow); transition: transform .24s ease; padding-top: max(4px,env(safe-area-inset-top)); }
+  /* clip the off-canvas drawers so the page never scrolls/pans horizontally */
+  .body { overflow: hidden; }
+  .side { position: absolute; top: 0; bottom: 0; width: min(290px,84vw); z-index: 40; background: color-mix(in srgb, var(--bg-2) 96%, transparent); backdrop-filter: blur(18px); box-shadow: var(--shadow); transition: transform .24s ease, visibility .24s; padding-top: max(4px,env(safe-area-inset-top)); visibility: hidden; }
   .side--left { left: 0; transform: translateX(-100%); } .side--right { right: 0; transform: translateX(100%); }
-  .side.open { transform: none; }
+  .side.open { transform: none; visibility: visible; }
   .side-close { display: inline-flex; align-items: center; justify-content: center; }
   .scrim:not([hidden]) { display: block; }
   /* keep popovers as dropdowns below their button (topbar's backdrop-filter is a
@@ -358,7 +363,11 @@ button { font-family: inherit; color: inherit; }
   .pop { width: min(86vw, 280px); max-height: 70vh; }
   .msg { max-width: 86%; } .messages, .typing, .reply-bar { padding-left: 14px; padding-right: 14px; }
   .composer { padding-left: 12px; padding-right: 12px; } .emoji-panel { left: 12px; } .emoji-grid { grid-template-columns: repeat(7,1fr); }
-  .msgtools { display: flex; }
+  /* 16px inputs stop iOS Safari from auto-zooming on focus */
+  .input, .room-input, .emoji-search { font-size: 16px; }
+  /* no hover on touch: tools appear on tap (see msgNode), never permanently over the text */
+  .msgtools { display: none; }
+  .msg.tools-open .msgtools { display: flex; }
 }
 @media (max-width: 380px) { .headline { font-size: 12px; } .tb-right { gap: 6px; } .iconpill, .status { padding: 6px 7px; } }
 

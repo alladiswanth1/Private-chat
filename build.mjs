@@ -3,6 +3,7 @@
 // that is the same app plus a 404 flag). No separate .js/.css/vendor files are
 // published, so none can be opened by URL — only the page itself (which is the app).
 import {readFileSync, writeFileSync, rmSync, existsSync} from 'node:fs'
+import {createHash} from 'node:crypto'
 
 const SRC = 'src', OUT = 'docs'
 const read = f => readFileSync(`${SRC}/${f}`, 'utf8')
@@ -38,9 +39,18 @@ if (app === before) throw new Error('Could not find the app vendor import to rep
 const escJs = s => s.replace(/<\/(script)/gi, '<\\/$1')
 
 const styleTag = `<style>\n${css}\n</style>`
+const vendorJs = `\n${escJs(vendor)}\n`
+const appJs = `\n${escJs(app)}\n`
+const flagJs = 'window.__C2C_404 = 1'   // injected into 404.html below
 const scriptTags =
-  `<script type="module">\n${escJs(vendor)}\n</script>\n` +
-  `  <script type="module">\n${escJs(app)}\n</script>`
+  `<script type="module">${vendorJs}</script>\n` +
+  `  <script type="module">${appJs}</script>`
+
+// 3a) script-src carries the sha256 of each inline script INSTEAD of
+//     'unsafe-inline' — even an HTML-injection bug couldn't execute a script
+//     the build didn't hash. (The 404 flag hash is inert on index.html.)
+const cspHash = s => "'sha256-" + createHash('sha256').update(s, 'utf8').digest('base64') + "'"
+const scriptSrc = [vendorJs, appJs, flagJs].map(cspHash).join(' ')
 
 // 3b) Tighten the CSP: connect-src lists exactly the relay origins from
 //     CONFIG.relayUrls instead of a blanket `wss:` (TURN/WebRTC traffic is not
@@ -54,17 +64,18 @@ if (!relayOrigins.length) throw new Error('CONFIG.relayUrls yielded no wss:// or
 // minified JS) are NOT treated as special replacement patterns.
 const html = template
   .replace('__CSP_CONNECT__', () => relayOrigins.join(' '))
+  .replace('__CSP_SCRIPT__', () => scriptSrc)
   .replace('<!--INLINE_STYLE-->', () => styleTag)
   .replace('<!--INLINE_SCRIPT-->', () => scriptTags)
 
-if (html.includes('__CSP_CONNECT__') || html.includes('<!--INLINE_STYLE-->') || html.includes('<!--INLINE_SCRIPT-->')) {
+if (html.includes('__CSP_CONNECT__') || html.includes('__CSP_SCRIPT__') || html.includes('<!--INLINE_STYLE-->') || html.includes('<!--INLINE_SCRIPT-->')) {
   throw new Error('Template placeholders were not replaced')
 }
 
 writeFileSync(`${OUT}/index.html`, html)
 // The 404 copy is the same app plus a flag: it serves UNKNOWN paths, so the app
 // must not trust location.pathname as its base directory there (see BASE in app.js).
-const html404 = html.replace('<body>', '<body>\n<script>window.__C2C_404 = 1</script>')
+const html404 = html.replace('<body>', `<body>\n<script>${flagJs}</script>`)
 if (html404 === html) throw new Error('Could not inject the 404 flag (no <body> found)')
 writeFileSync(`${OUT}/404.html`, html404)
 

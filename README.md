@@ -145,16 +145,21 @@ Everything tweakable lives in `CONFIG` at the top of `src/app.js` (run `node bui
 | `flood`      | Per-channel inbound rate limits (msg/name/typing/react/presence).          |
 | `turnConfig` | Optional TURN servers (see above).                                        |
 | `maxNameLen` / `maxMsgLen` | Input length caps.                                          |
+| `minPassLen` | Minimum private-room password length (default 8 — it's key material).     |
 | `maxFileBytes` | Largest file/image a peer may send (default 10 MB).                     |
 
 **Rooms & sharing:** the default room is the whole domain (public). Click the **Rooms**
 button (top-right) to **create or join a private room by name** — pick any name/number
-plus a **required password**. Only people who enter the *same name **and** password*
-connect: Trystero derives the channel key from both, so a wrong password reaches no one
-(the password never goes in the URL). Invite by sharing the link (`#r=<name>`) and giving
-people the password **separately**. Rooms are just room-ids over the free relays —
-nothing is stored, and a room vanishes the moment its last person leaves. No server, no
-database.
+plus a **required password (min 8 characters)**. Only people who enter the *same name
+**and** password* connect: the password is first **stretched with PBKDF2 (SHA-256,
+310k iterations, salted with the room id)** and the result becomes the channel's
+encryption key, so a wrong password reaches no one and a captured handshake can't be
+brute-forced offline at raw-hash speed (the password never goes in the URL, and is
+wiped from `sessionStorage` right after it's read). Still: the room is only as strong
+as the passphrase — prefer a few random words over `password1`. Invite by sharing the
+link (`#r=<name>`) and giving people the password **separately**. Rooms are just
+room-ids over the free relays — nothing is stored, and a room vanishes the moment its
+last person leaves. No server, no database.
 
 ---
 
@@ -213,10 +218,12 @@ database.
   election (lowest id sends). A determined attacker could regenerate ids until
   they hold a very low one, letting them win name clashes or get elected to hand
   newcomers history. The hash-DAG cross-check (see *Verifiable hearsay*) means a
-  forged history is only believed if **every** other person present colludes (or
-  nobody else is there to vouch — the room tells you which); self-impersonation
-  is rejected, reply quotes and live messages never trust claimed identity, and
-  the `#id` badge always exposes same-named peers.
+  forged history is only believed if **every** other connection present colludes (or
+  nobody else is there to vouch — the room tells you which). Note the word
+  *connection*: peer ids are free, so one person running several tabs counts as
+  several "independent" witnesses — treat the confirmation count as connections,
+  not people. Self-impersonation is rejected, reply quotes and live messages never
+  trust claimed identity, and the `#id` badge always exposes same-named peers.
 - The **10 MB file cap is enforced on what gets kept/shown**, not on the wire: a
   hostile peer could still stream you junk bytes before the cap rejects it. Mute
   (or leave) cuts them off.
