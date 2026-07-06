@@ -5,7 +5,7 @@
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-PM5qsaaD5oKj4fvayxxBhub3vbkkOELHUGi3SJR6LmM=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.snort.social wss://nostr.wine wss://relay.nostr.bg wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-zAcLQqlQoxpIO/P8JH7s5oPfa2pbyOFsKGmdFnnvOsw=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.snort.social wss://nostr.wine wss://relay.nostr.bg wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />
@@ -556,6 +556,13 @@ var Kr=Object.defineProperty;var $r=(e,n,t)=>n in e?Kr(e,n,{enumerable:!0,config
 // Live history hand-off lets newcomers catch up from whoever is currently present.
 
 const {joinRoom, selfId, getRelaySockets} = globalThis.__T;
+
+// WebCrypto + reliable WebRTC need a secure context. A plain-http visit (e.g.
+// Enforce-HTTPS off after a Pages reset) loads fine but can never connect —
+// crypto.subtle doesn't exist there — so upgrade to https before anything runs.
+if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  location.replace('https://' + location.host + location.pathname + location.search + location.hash)
+}
 
 // Best-effort clickjacking guard. GitHub Pages can't send frame-ancestors /
 // X-Frame-Options headers (and frame-ancestors is ignored in a meta CSP), so
@@ -1380,6 +1387,8 @@ async function stretchPass(pass) {
 
 async function startChat() {
   try {
+    // fail loudly, not silently: without WebCrypto the handshake can never work
+    if (!window.crypto || !crypto.subtle) throw new Error('WebCrypto unavailable')
     const cfg = {appId: CONFIG.appId, relayConfig: {urls: CONFIG.relayUrls, redundancy: CONFIG.relayRedundancy}}
     if (CONFIG.turnConfig.length) cfg.turnConfig = CONFIG.turnConfig
     if (myPass) cfg.password = await stretchPass(myPass)

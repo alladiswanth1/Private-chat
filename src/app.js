@@ -7,6 +7,13 @@
 
 import {joinRoom, selfId, getRelaySockets} from './vendor/trystero-nostr.bundle.js'
 
+// WebCrypto + reliable WebRTC need a secure context. A plain-http visit (e.g.
+// Enforce-HTTPS off after a Pages reset) loads fine but can never connect —
+// crypto.subtle doesn't exist there — so upgrade to https before anything runs.
+if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  location.replace('https://' + location.host + location.pathname + location.search + location.hash)
+}
+
 // Best-effort clickjacking guard. GitHub Pages can't send frame-ancestors /
 // X-Frame-Options headers (and frame-ancestors is ignored in a meta CSP), so
 // bust out of any embedding frame; if the framer blocks that, hide the app.
@@ -830,6 +837,8 @@ async function stretchPass(pass) {
 
 async function startChat() {
   try {
+    // fail loudly, not silently: without WebCrypto the handshake can never work
+    if (!window.crypto || !crypto.subtle) throw new Error('WebCrypto unavailable')
     const cfg = {appId: CONFIG.appId, relayConfig: {urls: CONFIG.relayUrls, redundancy: CONFIG.relayRedundancy}}
     if (CONFIG.turnConfig.length) cfg.turnConfig = CONFIG.turnConfig
     if (myPass) cfg.password = await stretchPass(myPass)
