@@ -28,7 +28,7 @@
       <div class="gate-id"><span id="gate-avatar" class="gate-avatar" aria-hidden="true">?</span></div>
       <label class="gate-label" for="nick">Pick a name to join</label>
       <div class="gate-row">
-        <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" spellcheck="false" required />
+        <input id="nick" class="gate-input" type="text" maxlength="24" placeholder="e.g. NightOwl" autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="go" required />
         <button id="surprise" class="gate-dice" type="button" title="Surprise me">🎲</button>
       </div>
       <div id="gate-pass-wrap" class="gate-passwrap" hidden>
@@ -48,16 +48,16 @@
       <div class="tb-left">
         <button id="rules-toggle" class="iconpill mobile-only" type="button" aria-label="Guidelines & settings" aria-expanded="false">📜</button>
         <span class="brand"><span class="brand-mark">💬</span><span class="brand-name">chat&#8209;to&#8209;chat</span></span>
-        <button id="room-chip" class="roomchip" type="button" title="You're in a private room" hidden><span class="rc-hash">#</span><span id="room-chip-name"></span></button>
+        <button id="room-chip" class="roomchip" type="button" title="You're in a private room — open room options" aria-label="Room options" hidden><span class="rc-hash">#</span><span id="room-chip-name"></span></button>
       </div>
       <div class="tb-center"><h1 class="headline">Global Free Speech</h1></div>
       <div class="tb-right">
         <div class="pop-wrap">
-          <button id="status" class="status" type="button" title="Connection details"><span id="status-dot" class="dot dot--off"></span><span id="status-text" class="status-text">Connecting…</span></button>
+          <button id="status" class="status" type="button" title="Connection details" aria-haspopup="true" aria-expanded="false"><span id="status-dot" class="dot dot--off"></span><span id="status-text" class="status-text">Connecting…</span></button>
           <div id="status-panel" class="pop status-panel" hidden></div>
         </div>
         <div class="pop-wrap">
-          <button id="rooms-btn" class="iconpill" type="button" aria-label="Rooms — create or join"><span class="ico">🚪</span><span class="rooms-lbl">Rooms</span></button>
+          <button id="rooms-btn" class="iconpill" type="button" aria-label="Rooms — create or join" aria-haspopup="true" aria-expanded="false"><span class="ico">🚪</span><span class="rooms-lbl">Rooms</span></button>
           <div id="rooms" class="pop rooms-panel" hidden>
             <div class="pop-h">This room</div>
             <p id="room-current" class="share-note">You're in the public room.</p>
@@ -136,21 +136,26 @@
     <footer class="composer">
       <div id="emoji" class="emoji-panel" hidden>
         <input id="emoji-search" class="emoji-search" type="text" placeholder="Search emoji…" aria-label="Search emoji" autocomplete="off" />
-        <div id="emoji-grid" class="emoji-grid" role="grid" aria-label="Emoji"></div>
+        <!-- role=group, not grid: the cells are plain buttons reached with a roving
+             tabindex, and claiming a grid without gridcells misleads screen readers -->
+        <div id="emoji-grid" class="emoji-grid" role="group" aria-label="Emoji"></div>
       </div>
-      <button id="emoji-btn" class="icon-btn" type="button" title="Emoji" aria-label="Emoji">😀</button>
+      <button id="emoji-btn" class="icon-btn" type="button" title="Emoji" aria-label="Emoji" aria-haspopup="true" aria-expanded="false">😀</button>
       <button id="attach-btn" class="icon-btn" type="button" title="Send a file or image" aria-label="Attach a file">📎</button>
       <input id="file-input" type="file" hidden aria-hidden="true" />
-      <textarea id="input" class="input" rows="1" maxlength="4000" placeholder="Say something…  (Shift+Enter for a new line, /help for commands)" aria-label="Message" autocomplete="off" spellcheck="true"></textarea>
+      <div class="input-wrap">
+        <textarea id="input" class="input" rows="1" maxlength="4000" placeholder="Say something…  (Shift+Enter for a new line, /help for commands)" aria-label="Message" autocomplete="off" autocapitalize="sentences" spellcheck="true" enterkeyhint="send"></textarea>
+        <span id="counter" class="counter" aria-hidden="true" hidden></span>
+      </div>
       <button id="send" class="send-btn" type="button" title="Send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3 10l12 2-12 2z"/></svg>
       </button>
     </footer>
 
     <!-- forced-rename modal: shown when this peer's name clashes after joining -->
-    <div id="rename" class="renamemodal" hidden>
+    <div id="rename" class="renamemodal" role="dialog" aria-modal="true" aria-labelledby="rename-h" hidden>
       <form id="rename-form" class="renamecard">
-        <div class="rename-h">⚠ Name already taken</div>
+        <div class="rename-h" id="rename-h">⚠ Name already taken</div>
         <p id="rename-msg" class="rename-msg"></p>
         <input id="rename-input" class="gate-input" type="text" maxlength="24" placeholder="choose a different name" autocomplete="off" spellcheck="false" />
         <p id="rename-err" class="rename-err" role="alert" hidden></p>
@@ -160,7 +165,7 @@
   </div>
 
   <!-- image viewer (opened from an inline image; blob stays local) -->
-  <div id="lightbox" class="lightbox" hidden>
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Image viewer" hidden>
     <img id="lightbox-img" class="lightbox-img" alt="" />
     <div class="lb-bar">
       <span id="lightbox-name" class="lb-name"></span>

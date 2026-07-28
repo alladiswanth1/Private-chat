@@ -204,16 +204,21 @@ last person leaves. No server, no database.
   composer grows with the text up to a cap.
 - **Delivery state on your own messages** — `◌` while sending, `✓` once it reached the
   people present, and an honest `·` ("no one else is here yet") instead of a tick that
-  pretends someone received it.
+  pretends someone received it. A failed send shows `⚠` and is **click-to-retry**;
+  peers dedupe on the message id, so a retry can never post a double.
 - **Copy any message** from the message toolbar (with a fallback for browsers that
   refuse the async clipboard).
+- **React and reply to shared files and images**, not just text messages.
+- **A character counter** that stays out of the way until you're near the 4,000-character
+  cap, then counts down (and turns red for the last 120).
 - **Touch gestures** — **swipe a message right to reply**, **long-press** for the
   react/reply/copy toolbar (a plain tap just dismisses the keyboard, as it should),
   each with a light haptic tap where the device supports it.
 - **Readable date separators** — `Yesterday · 14:32`, `Tuesday · 09:05`, and just the
   time for today.
 - **Come-back-later cues** — a **"New messages"** divider marks where you left off, and
-  the jump button counts what you missed (*"↓ 3 new messages"*).
+  the jump button counts what you missed (*"↓ 3 new messages"*). Scroll back through
+  the log and it offers a plain *"↓ Latest"* to get you home again.
 - **Optional chime & desktop notifications** — both off by default, both opt-in from
   Settings. The chime is synthesised with WebAudio (no audio file, no request) and
   notifications only fire while the tab is in the background.
@@ -231,6 +236,11 @@ last person leaves. No server, no database.
   guidelines, connection + relay/latency panel, and an honest IP-exposure notice.
 - Built for keyboards & screen readers: focus rings, focus-trapped mobile drawers,
   keyboard-navigable emoji grid, live regions, skip link, and forced-colors support.
+  Popovers keep `aria-expanded` honest and hand focus back to their button on Escape.
+- **Motion with a purpose** — rows drift in from the side their bubble sits on, panels
+  and menus scale up from the control that opened them, the theme swap cross-fades, and
+  every control has press feedback. All of it collapses to nothing under
+  `prefers-reduced-motion`.
 - 3-column layout on desktop; slide-in drawers on mobile.
 - **Security/abuse hardening:** transport-namespaced message ids (no silent
   suppression), sanitization of bidi/zero-width/control chars, per-channel flood
@@ -242,6 +252,10 @@ last person leaves. No server, no database.
   per message; file-transfer progress writes to a retained node instead of querying
   the DOM hundreds of times; and sticking to the newest message is coalesced into one
   scroll write per frame, so a burst of ten messages costs one layout instead of ten.
+  Scroll handling is rAF-coalesced too (a flicked list fires dozens of events per
+  frame, each of which used to force a layout), join/leave lines append instead of
+  rebuilding the list, and the mobile-vs-desktop breakpoint is read from a single
+  `MediaQueryList` rather than allocating one per touch.
   Measured on a 400-message room: a full re-render went from **~63 ms of blocked main
   thread to ~7 ms**, and on a 6×-throttled CPU (mid-range phone proxy) incoming
   messages went from **4.8 ms to 2.6 ms each** and first paint from **870 ms to

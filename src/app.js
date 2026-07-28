@@ -111,6 +111,8 @@ const CONFIG = {
   gapDividerMs: 5 * 60 * 1000,
   // per-channel inbound flood budgets (count within window ms)
   flood: { msg: [20, 2000], name: [6, 4000], typing: [40, 2000], react: [40, 2000], presence: [20, 4000], file: [6, 12000], attq: [4, 10000], atth: [8, 10000] },
+  jumpAt: 400,        // px scrolled away from the newest before "jump to latest" appears
+  counterAt: 0.85,    // show the character counter past this fraction of maxMsgLen
 }
 
 /* ------------------------------------------------------------------ *
@@ -136,6 +138,7 @@ const soundBtn = $('#sound-btn'), notifyBtn = $('#notify-btn')
 const lightbox = $('#lightbox'), lightboxImg = $('#lightbox-img'), lightboxDl = $('#lightbox-dl'), lightboxName = $('#lightbox-name'), lightboxClose = $('#lightbox-close')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 const renameModal = $('#rename'), renameForm = $('#rename-form'), renameMsg = $('#rename-msg'), renameInput = $('#rename-input'), renameErr = $('#rename-err')
+const counterEl = $('#counter')
 
 /* ------------------------------------------------------------------ *
  * State
@@ -213,8 +216,11 @@ function relTime(t) {
 const nameOf = peerId => { const p = peers.get(peerId); return (p && p.name) || shortId(peerId) }
 const keyOf = (author, rawId) => author + '::' + rawId
 const newRawId = () => Date.now().toString(36) + '-' + (seq++).toString(36)
-const isNearBottom = () => messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 120
+const distFromBottom = () => messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight
+const isNearBottom = () => distFromBottom() < 120
 const isMuted = peerId => muted.has(peerId)
+// one-line preview of an entry — used by reply quotes for messages AND files
+const snippetOf = e => (e && e.kind === 'file') ? '📎 ' + (e.fileName || 'file') : String((e && e.text) || '').slice(0, 120)
 
 // Case-insensitive, trimmed equality — display names must be unique per room.
 const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
@@ -295,7 +301,8 @@ function addEntry(entry) {
     const r = timeline.shift()
     evicted = true
     entryById.delete(r.id); nodeCache.delete(r.id)   // drop the retained DOM row too
-    if (r.kind === 'msg') reactions.delete(r.id)
+    if (r.kind === 'msg' || r.kind === 'file') reactions.delete(r.id)
+    if (r.id === unreadMarkerId) unreadMarkerId = null   // its divider can never render again
     if (r.kind === 'file' && r.url) URL.revokeObjectURL(r.url)   // free the blob (ephemeral)
     // Do NOT delete r.id from seenIds — keeping dedup stable stops an evicted
     // message being re-inserted as a duplicate by a late history burst.
@@ -407,9 +414,18 @@ function msgNode(e, grouped) {
   const time = document.createElement('span')
   time.className = 'time'
   time.textContent = fmtTime(e.t)
+  // the relative label ("3 min ago") is refreshed on hover — baking it in at build
+  // time would freeze every message at "just now"
+  time.dataset.t = String(e.t)
   time.title = relTime(e.t)
   meta.appendChild(time)
-  if (self) { const tk = document.createElement('span'); paintTick(tk, e.status); meta.appendChild(tk) }
+  if (self) {
+    const tk = document.createElement('button')
+    tk.type = 'button'
+    paintTick(tk, e.status)
+    tk.addEventListener('click', () => retrySend(e))
+    meta.appendChild(tk)
+  }
   stack.appendChild(meta)
 
   if (e.reply) stack.appendChild(replyQuote(e.reply))
@@ -429,6 +445,12 @@ function msgNode(e, grouped) {
   row.appendChild(stack)
   return row
 }
+
+// keep the "N min ago" tooltip honest without a timer ticking over every row
+messagesEl.addEventListener('pointerover', ev => {
+  const t = ev.target && ev.target.closest && ev.target.closest('.time[data-t]')
+  if (t) t.title = relTime(Number(t.dataset.t))
+}, {passive: true})
 
 /* ----- touch gestures: long-press for tools, swipe right to reply ---- */
 const LONG_PRESS_MS = 420, SWIPE_TRIGGER = 52, SWIPE_MAX = 48
@@ -482,19 +504,35 @@ const TICKS = {
   sending: ['◌', 'Sending…'],
   sent: ['✓', 'Sent to everyone here'],
   alone: ['·', 'No one else is here yet — nobody received this'],
-  failed: ['⚠', 'Could not send — check the connection'],
+  failed: ['⚠', 'Could not send — tap to try again'],
 }
 function paintTick(el, status) {
   const [glyph, title] = TICKS[status] || TICKS.sending
   el.className = 'tick tick--' + (status || 'sending')
   el.textContent = glyph
   el.title = title
+  // only a failed send is actionable; the rest are read-only state
+  el.disabled = status !== 'failed'
+  el.setAttribute('aria-label', title)
 }
 function setMsgStatus(entry, status) {
   entry.status = status
   const hit = nodeCache.get(entry.id)
   const el = hit && hit.el.querySelector('.tick')
   if (el) paintTick(el, status)
+}
+// Re-send a message whose first attempt failed. Peers dedupe on the id, so a
+// retry that partially landed the first time can't produce a double.
+function retrySend(entry) {
+  if (!actions || entry.status !== 'failed') return
+  setMsgStatus(entry, 'sending')
+  const audience = peers.size
+  const payload = {id: rawIdOf(entry.id), t: entry.wt ?? entry.t, name: myName, text: entry.text, prev: entry.prev || []}
+  if (entry.emote) payload.emote = true
+  if (entry.reply) payload.reply = entry.reply
+  Promise.resolve(actions.msg.send(payload)).then(
+    () => setMsgStatus(entry, audience ? 'sent' : 'alone'),
+    () => setMsgStatus(entry, 'failed'))
 }
 
 function badge(peerId) {
@@ -520,9 +558,14 @@ function replyQuote(reply) {
   return q
 }
 
+// `[data-key]` (not `.msg[data-key]`) so a quoted /me line — which renders as
+// `.sys.emote` — can still be jumped to
 function scrollToKey(key) {
-  const el = messagesEl.querySelector(`.msg[data-key="${cssEsc(key)}"]`)
-  if (el) { el.scrollIntoView({block: 'center', behavior: 'smooth'}); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200) }
+  const el = messagesEl.querySelector(`[data-key="${cssEsc(key)}"]`)
+  if (!el) { addSystem('That message is no longer in view.'); return }
+  el.scrollIntoView({block: 'center', behavior: 'smooth'})
+  el.classList.add('flash')
+  setTimeout(() => el.classList.remove('flash'), 1200)
 }
 const cssEsc = s => (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&')
 
@@ -634,43 +677,64 @@ function msgTools(e) {
   reply.type = 'button'; reply.className = 'mt'; reply.textContent = '↩'; reply.title = 'Reply'
   reply.setAttribute('aria-label', 'Reply to message')
   reply.addEventListener('click', ev => { ev.stopPropagation(); startReply(e) })
-  const copy = document.createElement('button')
-  copy.type = 'button'; copy.className = 'mt'; copy.textContent = '⧉'; copy.title = 'Copy text'
-  copy.setAttribute('aria-label', 'Copy message text')
-  copy.addEventListener('click', ev => {
-    ev.stopPropagation()
-    writeClipboard(e.text).then(ok => {
-      copy.textContent = ok ? '✓' : '✕'
-      setTimeout(() => { copy.textContent = '⧉' }, 1100)
+  t.append(react, reply)
+  if (e.kind !== 'file') {                        // nothing to put on the clipboard for a transfer
+    const copy = document.createElement('button')
+    copy.type = 'button'; copy.className = 'mt'; copy.textContent = '⧉'; copy.title = 'Copy text'
+    copy.setAttribute('aria-label', 'Copy message text')
+    copy.addEventListener('click', ev => {
+      ev.stopPropagation()
+      writeClipboard(e.text).then(ok => {
+        copy.textContent = ok ? '✓' : '✕'
+        copy.classList.add('mt--flash')
+        setTimeout(() => { copy.textContent = '⧉'; copy.classList.remove('mt--flash') }, 1100)
+      })
     })
-  })
-  t.append(react, reply, copy)
+    t.appendChild(copy)
+  }
   return t
 }
-let reactMenu = null
+let reactMenu = null, reactAnchor = null
+function placeReactMenu() {
+  if (!reactMenu || !reactAnchor) return
+  // the anchor scrolled out of the message list → the menu has nothing to point at
+  if (!reactAnchor.isConnected) { closeReactMenu(); return }
+  const r = reactAnchor.getBoundingClientRect(), m = reactMenu.getBoundingClientRect()
+  const top = r.bottom + 6 + m.height > innerHeight ? r.top - m.height - 6 : r.bottom + 6
+  reactMenu.style.top = Math.max(8, top) + 'px'
+  reactMenu.style.left = Math.max(8, Math.min(r.left, innerWidth - m.width - 8)) + 'px'
+}
 function openReactMenu(anchor, key) {
   closeReactMenu()
   reactMenu = document.createElement('div')
   reactMenu.className = 'reactmenu'
+  reactMenu.setAttribute('role', 'group')
+  reactMenu.setAttribute('aria-label', 'Quick reactions')
   QUICK_REACTS.forEach(em => {
     const b = document.createElement('button')
-    b.type = 'button'; b.textContent = em
+    b.type = 'button'; b.textContent = em; b.setAttribute('aria-label', 'React with ' + em)
     b.addEventListener('click', () => { toggleReaction(key, em); closeReactMenu() })
     reactMenu.appendChild(b)
   })
   // portaled to <body>: a popup nested in a paint-contained row would be clipped
   document.body.appendChild(reactMenu)
-  const r = anchor.getBoundingClientRect(), m = reactMenu.getBoundingClientRect()
-  const top = r.bottom + 6 + m.height > innerHeight ? r.top - m.height - 6 : r.bottom + 6
-  reactMenu.style.top = Math.max(8, top) + 'px'
-  reactMenu.style.left = Math.max(8, Math.min(r.left, innerWidth - m.width - 8)) + 'px'
+  reactAnchor = anchor
+  placeReactMenu()
+  // a fixed-position popup would otherwise hang in mid-air once the list moves
+  messagesEl.addEventListener('scroll', placeReactMenu, {passive: true})
+  window.addEventListener('resize', placeReactMenu, {passive: true})
   setTimeout(() => document.addEventListener('click', closeReactMenu, {once: true}), 0)
 }
-function closeReactMenu() { if (reactMenu) { reactMenu.remove(); reactMenu = null } }
+function closeReactMenu() {
+  if (!reactMenu) return
+  messagesEl.removeEventListener('scroll', placeReactMenu)
+  window.removeEventListener('resize', placeReactMenu)
+  reactMenu.remove(); reactMenu = null; reactAnchor = null
+}
 
 /* ----- replies ---- */
 function startReply(e) {
-  replyTo = {key: e.id, name: e.peerId === selfId ? 'yourself' : e.name, snippet: e.text.slice(0, 120)}
+  replyTo = {key: e.id, name: e.peerId === selfId ? 'yourself' : e.name, snippet: snippetOf(e)}
   replyText.textContent = (replyTo.name) + ': ' + replyTo.snippet
   replyBar.hidden = false
   inputEl.focus()
@@ -692,9 +756,16 @@ function refreshEmpty() {
  * Adding entries
  * ------------------------------------------------------------------ */
 function addSystem(text) {
-  const stick = isNearBottom()
-  addEntry({kind: 'sys', id: 'sys-' + seq++, t: Date.now(), text})
-  renderTimeline({stick})
+  const stick = keepAtBottom
+  const entry = {kind: 'sys', id: 'sys-' + seq++, t: Date.now(), text}
+  const res = addEntry(entry)
+  if (!res) return
+  // Same fast path the message hot path uses: a join/leave/status line at the end
+  // of an already-rendered timeline is one appendChild, not a full rebuild.
+  if (res.atEnd && !res.evicted && messagesEl.firstElementChild) {
+    messagesEl.appendChild(sysFor(entry))
+    if (stick) stickToBottom()
+  } else renderTimeline({stick})
 }
 
 // batched join/leave/rename lines (rostercap)
@@ -744,7 +815,11 @@ function appendOne(entry, stick) {
   if (prev && prev.kind === 'msg' && entry.t - prev.t > CONFIG.gapDividerMs) messagesEl.appendChild(sysNode(timeLabel(entry.t)))
   const grouped = !!prev && prev.kind === 'msg' && !prev.emote && !entry.emote && prev.peerId === entry.peerId && entry.t - prev.t <= CONFIG.gapDividerMs
   const node = nodeFor(entry, grouped)
+  // The class must come back off: cached rows are re-inserted by a later full
+  // render, and a re-inserted element replays its animation — so a stale
+  // `msg--new` would make old rows pop again every time the list rebuilds.
   node.classList.add('msg--new')
+  setTimeout(() => node.classList.remove('msg--new'), 300)
   messagesEl.appendChild(node)
   if (stick) stickToBottom()
 }
@@ -795,17 +870,38 @@ function initViewportFit() {
  * ------------------------------------------------------------------ */
 let awayCount = 0
 function showJump() {
-  jumpBtn.textContent = awayCount ? `↓ ${awayCount} new message${awayCount > 1 ? 's' : ''}` : '↓ New messages'
+  const label = awayCount ? `↓ ${awayCount} new message${awayCount > 1 ? 's' : ''}` : '↓ Latest'
+  if (jumpBtn.textContent !== label) jumpBtn.textContent = label
   jumpBtn.hidden = false
 }
 function hideJump() { jumpBtn.hidden = true; awayCount = 0 }
+// While the smooth scroll to the bottom is still running we are, by definition,
+// far from the bottom — without this the button would pop straight back up and
+// flicker until the animation landed.
+let jumpHold = 0
 jumpBtn.addEventListener('click', () => {
+  jumpHold = Date.now() + 1500
+  hideJump()
+  // Dropping the "New messages" line changes the list height, and its re-render
+  // pins the view itself — doing it after starting a smooth scroll would cancel
+  // that scroll by writing scrollTop directly.
+  if (unreadMarkerId !== null) { unreadMarkerId = null; renderTimeline({stick: true}) }
   messagesEl.scrollTo({top: messagesEl.scrollHeight, behavior: 'smooth'})
-  hideJump(); clearUnreadMarker()
 })
+// any deliberate scroll of their own ends the hold early
+;['wheel', 'touchstart', 'keydown'].forEach(ev => messagesEl.addEventListener(ev, () => { jumpHold = 0 }, {passive: true}))
+// Reading scrollTop/scrollHeight forces layout, so do it once per frame instead
+// of once per scroll event — a flicked list fires dozens of those per frame.
+let scrollRaf = 0
 messagesEl.addEventListener('scroll', () => {
-  keepAtBottom = isNearBottom()   // remember, so a keyboard resize doesn't yank you around
-  if (keepAtBottom) hideJump()
+  if (scrollRaf) return
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = 0
+    const dist = distFromBottom()
+    keepAtBottom = dist < 120   // remember, so a keyboard resize doesn't yank you around
+    if (keepAtBottom) { jumpHold = 0; hideJump() }
+    else if (dist > CONFIG.jumpAt && Date.now() > jumpHold) showJump()   // scrolled well back → offer the way down
+  })
 }, {passive: true})
 function clearUnreadMarker() {
   if (unreadMarkerId === null) return
@@ -837,7 +933,7 @@ function fileNode(e, grouped) {
   const stack = document.createElement('div'); stack.className = 'stack'
   const meta = document.createElement('div'); meta.className = 'meta'
   const who = document.createElement('span'); who.className = 'who'; who.style.color = self ? '' : colorOf(e.peerId); who.textContent = self ? 'You' : e.name
-  const time = document.createElement('span'); time.className = 'time'; time.textContent = fmtTime(e.t)
+  const time = document.createElement('span'); time.className = 'time'; time.textContent = fmtTime(e.t); time.dataset.t = String(e.t); time.title = relTime(e.t)
   meta.append(who, time); stack.appendChild(meta)
   const bubble = document.createElement('div'); bubble.className = 'bubble file'
   if (!e.url) {                                   // still transferring
@@ -859,16 +955,25 @@ function fileNode(e, grouped) {
     const fs = document.createElement('span'); fs.className = 'fsize'; fs.textContent = fmtBytes(e.fileSize)
     fm.append(fn, fs)
     const dl = document.createElement('a'); dl.className = 'fdl'; dl.href = e.url; dl.download = e.fileName || 'file'; dl.textContent = '⬇'; dl.title = 'Download'
+    dl.setAttribute('aria-label', 'Download ' + (e.fileName || 'file'))
     card.append(ic, fm, dl); bubble.appendChild(card)
   }
-  stack.appendChild(bubble); row.append(avatar, stack)
+  stack.appendChild(bubble)
+  // a shared image is exactly the thing people want to react to, so files get the
+  // same reaction bar / toolbar / touch gestures a message row has
+  const rbar = reactionBar(e.id)
+  if (rbar) stack.appendChild(rbar)
+  stack.appendChild(msgTools(e))
+  attachTouchGestures(row, e)
+  row.append(avatar, stack)
   return row
 }
 
 function addFileEntry(entry, fromSelf) {
-  const stick = fromSelf || isNearBottom()
+  const stick = fromSelf || keepAtBottom
   if (!seenIds.has(entry.id)) addEntry(entry)
   renderTimeline({stick})
+  if (!fromSelf && !stick) { awayCount++; showJump() }
 }
 // Update a visible progress bar in place — a 10 MB transfer fires hundreds of
 // progress events, and a full renderTimeline() per chunk freezes slow devices.
@@ -1075,7 +1180,9 @@ function settleAttestation() {
   else addSystem('History couldn’t be cross-checked — no one else here had anything to vouch with.')
   attest = null
 }
-function cancelAttestation() { if (attest) { clearTimeout(attest.timer); attest = null } }
+// attest.timer is a polling interval before witnesses are picked and a timeout
+// after, so clear it both ways rather than guessing which phase we're in
+function cancelAttestation() { if (attest) { clearInterval(attest.timer); clearTimeout(attest.timer); attest = null } }
 
 /* ------------------------------------------------------------------ *
  * Networking
@@ -1138,6 +1245,8 @@ function leaveAndReset() {
   reactions.clear(); seenIds.clear(); timeline.length = 0
   entryById.clear(); nodeCache.clear(); unreadMarkerId = null
   cancelAttestation(); resetDag()
+  clearTimeout(pendingSysTimer); pendingSysTimer = null; pendingSys = []
+  hideJump(); setUnread(0); keepAtBottom = true
   prevRelays = 0; noPeerSince = 0
 }
 
@@ -1246,7 +1355,8 @@ function wireRoom(room) {
     if (!d || typeof d.target !== 'string' || !allow(peerId, 'react')) return
     if (isMuted(peerId)) return              // muted peers' reactions don't register
     const target = findEntry(d.target)
-    if (!target || target.kind !== 'msg') return   // only real, present messages take reactions
+    // only a real, present message or file takes reactions
+    if (!target || (target.kind !== 'msg' && target.kind !== 'file')) return
     const em = sanitize(d.emoji, 8)
     if (!validEmoji(em)) return              // emoji only — no text smuggled into chips
     applyReaction(d.target, em, peerId, !!d.on)
@@ -1305,10 +1415,10 @@ function parseReply(r) {
   // Never trust a peer's claimed quote author/text. If we can't resolve the
   // referenced message in our own timeline, show a neutral placeholder.
   if (!own) return {key: clampStr(r.key, 130), unresolved: true}
-  return {key: clampStr(r.key, 130), name: own.peerId === selfId ? 'You' : own.name, snippet: own.text.slice(0, 120)}
+  return {key: clampStr(r.key, 130), name: own.peerId === selfId ? 'You' : own.name, snippet: snippetOf(own)}
 }
 
-function setPeerName(peerId, value, fromMsg) {
+function setPeerName(peerId, value) {
   const name = sanitize(value, CONFIG.maxNameLen).trim()
   if (!name || !peers.has(peerId)) return
   const p = peers.get(peerId)
@@ -1480,12 +1590,25 @@ function stopTyping() {
   if (actions && iTyping) actions.typing.send(false)
   iTyping = false; typingSentAt = 0
 }
-function updateSendBtn() { sendBtn.disabled = !inputEl.value.trim() }
+function updateSendBtn() {
+  sendBtn.disabled = !inputEl.value.trim()
+  updateCounter()
+}
+// Silent until it matters: the remaining-characters hint only appears near the
+// cap, so a normal message never has a number hovering over it.
+function updateCounter() {
+  const left = CONFIG.maxMsgLen - inputEl.value.length
+  const show = inputEl.value.length >= CONFIG.maxMsgLen * CONFIG.counterAt
+  counterEl.hidden = !show
+  if (!show) return
+  counterEl.textContent = String(left)
+  counterEl.classList.toggle('counter--tight', left <= 120)
+}
 
 /* ------------------------------------------------------------------ *
  * Connection status + relay/ping panel
  * ------------------------------------------------------------------ */
-let prevRelays = 0, noPeerSince = 0, statusTimer = null
+let prevRelays = 0, noPeerSince = 0, statusTimer = null, statusTick = null
 function relayStates() {
   try { return Object.entries(getRelaySockets() || {}).map(([url, s]) => ({url, open: s && s.readyState === 1})) } catch { return [] }
 }
@@ -1506,13 +1629,28 @@ function updateStatusLoop() {
     if (online > 0) noPeerSince = 0
     prevRelays = relays
   }
+  statusTick = tick
   tick()
   if (statusTimer) clearInterval(statusTimer)   // avoid duplicate timers on reconnect
   statusTimer = setInterval(tick, 2000)
 }
 function setStatus(t) { if (statusText.textContent !== t) { statusText.textContent = t; announceStatus(t) } }
 
-async function openStatusPanel() {
+// Popover open/close in one place, so `aria-expanded` can never drift out of
+// sync with what is on screen and Escape always hands focus back to the trigger.
+function setPop(panel, btn, open, refocus) {
+  panel.hidden = !open
+  if (btn) btn.setAttribute('aria-expanded', String(open))
+  if (!open && refocus && btn) btn.focus()
+}
+// only one popover at a time — opening one closes the others
+function closeOtherPops(keep) {
+  if (keep !== statusPanel) setPop(statusPanel, statusBtn, false)
+  if (keep !== roomsPanel) setPop(roomsPanel, roomsBtn, false)
+  if (keep !== emojiPanel) setPop(emojiPanel, emojiBtn, false)
+}
+function openStatusPanel() {
+  closeOtherPops(statusPanel)
   statusPanel.replaceChildren()
   const h = document.createElement('div'); h.className = 'sp-h'; h.textContent = 'Relays'; statusPanel.appendChild(h)
   for (const s of relayStates()) {
@@ -1532,11 +1670,11 @@ async function openStatusPanel() {
   }
   const rc = document.createElement('button')
   rc.type = 'button'; rc.className = 'share-b'; rc.textContent = '↻ Reconnect'; rc.style.marginTop = '10px'; rc.style.width = '100%'
-  rc.addEventListener('click', () => { statusPanel.hidden = true; reconnect() })
+  rc.addEventListener('click', () => { setPop(statusPanel, statusBtn, false); reconnect() })
   statusPanel.appendChild(rc)
-  statusPanel.hidden = false
+  setPop(statusPanel, statusBtn, true)
 }
-function toggleStatusPanel() { statusPanel.hidden ? openStatusPanel() : (statusPanel.hidden = true) }
+function toggleStatusPanel() { statusPanel.hidden ? openStatusPanel() : setPop(statusPanel, statusBtn, false) }
 
 /* ------------------------------------------------------------------ *
  * Emoji picker (search + recents + keyboard)
@@ -1589,7 +1727,7 @@ function pickEmoji(e) {
   insertAtCursor(e)
   recents = [e, ...recents.filter(x => x !== e)].slice(0, 16)
   try { localStorage.setItem('c2c-emoji', JSON.stringify(recents)) } catch {}
-  emojiPanel.hidden = true; inputEl.focus()
+  setPop(emojiPanel, emojiBtn, false); inputEl.focus()
 }
 function insertAtCursor(text) {
   const s = inputEl.selectionStart ?? inputEl.value.length
@@ -1649,6 +1787,7 @@ function copyText(text, btn, restore) {
   })
 }
 function openRoomsPanel() {
+  closeOtherPops(roomsPanel)
   if (CONFIG.isDefaultRoom) {
     roomCurrentEl.textContent = "You're in the public room — open to anyone on this site."
     roomsCopyName.hidden = true; roomPublicBtn.hidden = true
@@ -1656,7 +1795,7 @@ function openRoomsPanel() {
     roomCurrentEl.textContent = `Private room: "${CONFIG.roomCode}". Invite by sharing the link, and tell people the password separately.`
     roomsCopyName.hidden = false; roomPublicBtn.hidden = false
   }
-  roomsPanel.hidden = false
+  setPop(roomsPanel, roomsBtn, true)
   setTimeout(() => roomNameInput.focus(), 0)
 }
 // Navigate (full load) into a named private room. The password rides in
@@ -1690,11 +1829,19 @@ try { theme = localStorage.getItem('c2c-theme') || 'system' } catch {}
 function applyTheme() {
   document.documentElement.dataset.theme = theme
   themeBtn.textContent = theme === 'light' ? '☀️' : theme === 'dark' ? '🌙' : '🌗'
-  themeBtn.title = 'Theme: ' + theme
+  const label = theme === 'light' ? 'Light' : theme === 'dark' ? 'Dark' : 'Match system'
+  themeBtn.title = `Theme: ${label} — click to change`
+  themeBtn.setAttribute('aria-label', `Theme: ${label}. Click to change.`)
 }
+let themeAnimTimer = null
 function cycleTheme() {
   theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]
   try { localStorage.setItem('c2c-theme', theme) } catch {}
+  // cross-fade the swap, then take the transition back off so it isn't paid for
+  // on every subsequent style change in the app
+  document.documentElement.classList.add('theme-anim')
+  clearTimeout(themeAnimTimer)
+  themeAnimTimer = setTimeout(() => document.documentElement.classList.remove('theme-anim'), 320)
   applyTheme()
 }
 /* ----- notification chime (synthesised — no audio asset, no network) ---- */
@@ -1774,6 +1921,7 @@ function setUnread(n) {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return
   setUnread(0)
+  if (statusTick) statusTick()   // the poll skips work while hidden — refresh on return
   // leave the "New messages" line up briefly so you can see where you left off
   setTimeout(() => { if (!document.hidden && isNearBottom()) clearUnreadMarker() }, 4000)
 })
@@ -1795,7 +1943,10 @@ let lastTrigger = null
 // The sidebars are off-canvas drawers ONLY at <=720px; on desktop they're static
 // columns. Modal/focus-trap behavior must apply to the drawer case only, else the
 // always-visible desktop sidebar becomes a keyboard trap (WCAG 2.1.2).
-const isDrawer = () => matchMedia('(max-width: 720px)').matches
+// One MediaQueryList, evaluated once. isDrawer() is on the touch hot path
+// (every pointerdown on a row), and matchMedia() allocates a new list each call.
+const NARROW_MQ = matchMedia('(max-width: 720px)')
+const isDrawer = () => NARROW_MQ.matches
 function syncScrim() { scrim.hidden = !(peopleEl.classList.contains('open') || rulesEl.classList.contains('open')) }
 function openAside(el, toggle) {
   ;(el === peopleEl ? rulesEl : peopleEl).classList.remove('open')
@@ -1838,9 +1989,15 @@ inputEl.addEventListener('keydown', e => {
 replyCancel.addEventListener('click', cancelReply)
 renameForm.addEventListener('submit', e => { e.preventDefault(); doRename() })
 
-emojiBtn.addEventListener('click', e => { e.stopPropagation(); emojiPanel.hidden = !emojiPanel.hidden; if (!emojiPanel.hidden) { emojiSearch.value = ''; buildEmoji(''); emojiSearch.focus() } })
+emojiBtn.addEventListener('click', e => {
+  e.stopPropagation()
+  const open = emojiPanel.hidden
+  if (open) closeOtherPops(emojiPanel)
+  setPop(emojiPanel, emojiBtn, open)
+  if (open) { emojiSearch.value = ''; buildEmoji(''); emojiSearch.focus() }
+})
 emojiSearch.addEventListener('input', () => buildEmoji(emojiSearch.value))
-document.addEventListener('click', e => { if (!emojiPanel.hidden && !emojiPanel.contains(e.target) && e.target !== emojiBtn) emojiPanel.hidden = true })
+document.addEventListener('click', e => { if (!emojiPanel.hidden && !emojiPanel.contains(e.target) && e.target !== emojiBtn) setPop(emojiPanel, emojiBtn, false) })
 
 // --- attach / drag-drop / paste files ---
 attachBtn.addEventListener('click', () => { if (!attachBtn.disabled) fileInput.click() })
@@ -1865,12 +2022,14 @@ inputEl.addEventListener('paste', e => {
 })
 
 statusBtn.addEventListener('click', e => { e.stopPropagation(); toggleStatusPanel() })
-document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) statusPanel.hidden = true })
+document.addEventListener('click', e => { if (!statusPanel.hidden && !statusPanel.contains(e.target) && !statusBtn.contains(e.target)) setPop(statusPanel, statusBtn, false) })
 // tap-away closes a touch-opened message toolbar
 document.addEventListener('click', e => { const open = messagesEl.querySelector('.msg.tools-open'); if (open && !open.contains(e.target)) open.classList.remove('tools-open') })
 
-roomsBtn.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden ? openRoomsPanel() : (roomsPanel.hidden = true) })
-document.addEventListener('click', e => { if (!roomsPanel.hidden && !roomsPanel.contains(e.target) && !roomsBtn.contains(e.target)) roomsPanel.hidden = true })
+roomsBtn.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden ? openRoomsPanel() : setPop(roomsPanel, roomsBtn, false) })
+document.addEventListener('click', e => { if (!roomsPanel.hidden && !roomsPanel.contains(e.target) && !roomsBtn.contains(e.target)) setPop(roomsPanel, roomsBtn, false) })
+// the room chip used to be an inert button — it now opens the panel it describes
+roomChip.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden ? openRoomsPanel() : setPop(roomsPanel, roomsBtn, false) })
 roomsCopyLink.addEventListener('click', () => copyText(shareUrl(), roomsCopyLink, '🔗 Copy link'))
 roomsCopyName.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, roomsCopyName, '# Copy name') })
 roomGoBtn.addEventListener('click', () => {
@@ -1903,9 +2062,9 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Tab') trapTab(e)
   if (e.key !== 'Escape') return
   if (!lightbox.hidden) { closeLightbox(); return }
-  if (!emojiPanel.hidden) { emojiPanel.hidden = true; emojiBtn.focus(); return }
-  if (!roomsPanel.hidden) { roomsPanel.hidden = true; return }
-  if (!statusPanel.hidden) { statusPanel.hidden = true; return }
+  if (!emojiPanel.hidden) { setPop(emojiPanel, emojiBtn, false, true); return }
+  if (!roomsPanel.hidden) { setPop(roomsPanel, roomsBtn, false, true); return }
+  if (!statusPanel.hidden) { setPop(statusPanel, statusBtn, false, true); return }
   if (reactMenu) { closeReactMenu(); return }
   if (peopleEl.classList.contains('open') || rulesEl.classList.contains('open')) closePanels()
 })
@@ -1914,10 +2073,28 @@ document.addEventListener('keydown', e => {
 const leaveRoom = () => { try { if (room) room.leave() } catch {} }
 window.addEventListener('pagehide', leaveRoom)
 window.addEventListener('beforeunload', leaveRoom)
-window.addEventListener('online', () => setStatus('Reconnecting…'))
-window.addEventListener('offline', () => { statusDot.className = 'dot dot--off'; setStatus('Offline') })
-window.addEventListener('error', e => addSystem('⚠️ ' + (e.message || 'a script error occurred')))
-window.addEventListener('unhandledrejection', e => addSystem('⚠️ ' + ((e.reason && e.reason.message) || 'an async error occurred')))
+// A real network drop kills the relay sockets and every data channel, and
+// nothing brings them back on its own — so coming back online re-joins the room
+// instead of only relabelling the status pill.
+let wasOffline = false
+window.addEventListener('offline', () => { wasOffline = true; statusDot.className = 'dot dot--off'; setStatus('Offline') })
+window.addEventListener('online', () => {
+  if (!wasOffline) return
+  wasOffline = false
+  setStatus('Reconnecting…')
+  if (!entered) return
+  setTimeout(() => { if (entered && navigator.onLine !== false) reconnect() }, 800)
+})
+// Surface script errors in the chat, but cap it: a fault inside the render path
+// would otherwise have each report trigger another render and flood the room.
+let errShown = 0
+function reportError(msg) {
+  if (errShown >= 3) return
+  errShown++
+  addSystem('⚠️ ' + msg + (errShown === 3 ? ' (further errors hidden)' : ''))
+}
+window.addEventListener('error', e => reportError(e.message || 'a script error occurred'))
+window.addEventListener('unhandledrejection', e => reportError((e.reason && e.reason.message) || 'an async error occurred'))
 
 /* ------------------------------------------------------------------ *
  * Name handling
@@ -1979,19 +2156,23 @@ function boot() {
   applyTheme(); applyBlur(); applySound(); applyNotify(); initViewportFit()
   nickInput.maxLength = CONFIG.maxNameLen
   inputEl.maxLength = CONFIG.maxMsgLen
-  // the keyboard hint only fits on wide screens
+  // the keyboard hint only fits on wide screens. Driven by the media query, not
+  // `resize` — an opening mobile keyboard fires resize repeatedly and none of
+  // those events can change the answer.
   const setPlaceholder = () => {
     inputEl.placeholder = isDrawer() ? 'Say something…' : 'Say something…  (Shift+Enter for a new line, /help for commands)'
   }
   setPlaceholder()
-  window.addEventListener('resize', setPlaceholder, {passive: true})
+  NARROW_MQ.addEventListener('change', setPlaceholder)
   buildEmoji('')
   updateSendBtn()
   emptyBtn.addEventListener('click', () => copyText(shareUrl(), emptyBtn, '🔗 Copy invite link'))
 
   // room chip + gate room label
   if (CONFIG.isDefaultRoom) { roomChip.hidden = true; gateRoomLabel.textContent = 'the public room' }
-  else { roomChipName.textContent = '#' + CONFIG.roomCode; roomChip.hidden = false; gateRoomLabel.textContent = 'private room #' + CONFIG.roomCode; gatePassWrap.hidden = false }
+  // the chip's markup already carries its own "#" span — prefixing another here
+  // rendered the room as "##name"
+  else { roomChipName.textContent = CONFIG.roomCode; roomChip.hidden = false; gateRoomLabel.textContent = 'private room #' + CONFIG.roomCode; gatePassWrap.hidden = false }
 
   // prefilled password (set when navigating from "new room") — consumed once,
   // then wiped so the plaintext doesn't linger in sessionStorage for the tab's life
