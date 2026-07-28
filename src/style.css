@@ -227,7 +227,7 @@ button { font-family: inherit; color: inherit; }
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 /* scroll-behavior stays auto: sticking to the bottom on every incoming message
    must be instant. Smooth scrolling is applied per-call for jump/reply only. */
-.messages { flex: 1; overflow-y: auto; padding: 18px clamp(12px,4vw,44px) 10px; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; overscroll-behavior: contain; }
+.messages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 18px clamp(12px,4vw,44px) 10px; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; overscroll-behavior: contain; }
 .messages::-webkit-scrollbar { width: 9px; } .messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
 .sys { align-self: center; margin: 9px 0; color: var(--txt-faint); font-size: 12px; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line-soft); padding: 4px 13px; border-radius: 999px; max-width: 90%; text-align: center; }
 .sys.emote { font-style: italic; color: var(--txt-dim); background: transparent; border: none; max-width: min(78%,720px); }
@@ -249,7 +249,11 @@ button { font-family: inherit; color: inherit; }
    out of view (the intrinsic size keeps the scrollbar honest). padding-top
    carries the hover toolbar INSIDE the row box, since content-visibility also
    applies paint containment and would otherwise clip a negative offset. */
-.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; content-visibility: auto; contain-intrinsic-size: auto 64px; }
+/* touch-action: pan-y keeps vertical scrolling native while letting a
+   horizontal drag become the swipe-to-reply gesture */
+.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; content-visibility: auto; contain-intrinsic-size: auto 64px; touch-action: pan-y; }
+.msg.swipe-back { transition: transform .18s ease; }
+.msg.swipe-armed .bubble { box-shadow: -3px 0 0 0 var(--accent), 0 4px 18px rgba(92,100,255,.35); }
 /* grouped rows keep their tight 2px gap, but still reserve the 10px of padding
    the toolbar lives in — the negative margin cancels it out visually */
 .msg.cont { margin-top: -8px; padding-top: 10px; } .msg.flash .bubble { animation: flash 1.2s ease; }
@@ -313,7 +317,11 @@ button { font-family: inherit; color: inherit; }
 /* message tools (hover/focus) */
 .msgtools { position: absolute; top: 0; right: 8px; display: none; gap: 2px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); border: 1px solid var(--line); border-radius: 999px; padding: 2px; box-shadow: var(--shadow-sm); z-index: 2; }
 .msg.me .msgtools { right: auto; left: 8px; }
-.msg:hover .msgtools, .msg:focus-within .msgtools { display: flex; }
+/* Hover only where hovering is real. Touch browsers leave :hover stuck on the
+   last-tapped element, which used to pop this toolbar open and then swallow the
+   next tap (it sits over the bubble). Touch opens it via long-press instead. */
+@media (hover: hover) and (pointer: fine) { .msg:hover .msgtools { display: flex; } }
+.msg:focus-within .msgtools, .msg.tools-open .msgtools { display: flex; }
 .mt { width: 26px; height: 26px; border: none; background: none; border-radius: 50%; cursor: pointer; font-size: 14px; }
 .mt:hover { background: var(--panel-3); }
 /* portaled to <body> and fixed-positioned: a popup inside a paint-contained
@@ -406,9 +414,6 @@ button { font-family: inherit; color: inherit; }
   .composer { padding-left: 12px; padding-right: 12px; } .emoji-panel { left: 12px; } .emoji-grid { grid-template-columns: repeat(7,1fr); }
   /* 16px inputs stop iOS Safari from auto-zooming on focus */
   .input, .room-input, .emoji-search { font-size: 16px; }
-  /* no hover on touch: tools appear on tap (see msgNode), never permanently over the text */
-  .msgtools { display: none; }
-  .msg.tools-open .msgtools { display: flex; }
 }
 @media (max-width: 380px) { .headline { font-size: 12px; } .tb-right { gap: 6px; } .iconpill, .status { padding: 6px 7px; } }
 
