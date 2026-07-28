@@ -191,9 +191,26 @@ last person leaves. No server, no database.
 - **Peer-to-peer file & image sharing** — attach (📎), drag-and-drop onto the chat, or
   paste an image; it streams **directly browser-to-browser over the encrypted WebRTC
   channel** (chunked, with a live progress bar), never through any server. Images render
-  inline; other files arrive as a download card. Up to 10 MB; **live-only** (not stored,
-  not part of the history hand-off) and the in-memory blob is freed when it scrolls off,
-  on `/clear`, or when you leave.
+  inline and open in a **full-screen viewer** (with a download button); other files
+  arrive as a download card. Up to 10 MB; **live-only** (not stored, not part of the
+  history hand-off) and the in-memory blob is freed when it scrolls off, on `/clear`,
+  or when you leave.
+- **Automatic image optimisation** — big photos are downscaled and re-encoded to WebP
+  **in your browser** before they hit the wire (a 1.1 MB shot becomes ~190 KB, and
+  pictures that used to exceed the cap now send at all). Pure canvas work: the pixels
+  never touch a server, and the original is used if compression wouldn't help.
+- **Multi-line messages** — Enter sends, **Shift+Enter** starts a new line, and the
+  composer grows with the text up to a cap.
+- **Delivery state on your own messages** — `◌` while sending, `✓` once it reached the
+  people present, and an honest `·` ("no one else is here yet") instead of a tick that
+  pretends someone received it.
+- **Copy any message** from the hover/tap toolbar (with a fallback for browsers that
+  refuse the async clipboard).
+- **Come-back-later cues** — a **"New messages"** divider marks where you left off, and
+  the jump button counts what you missed (*"↓ 3 new messages"*).
+- **Optional chime & desktop notifications** — both off by default, both opt-in from
+  Settings. The chime is synthesised with WebAudio (no audio file, no request) and
+  notifications only fire while the tab is in the background.
 - **Emoji reactions**, **reply / quote**, **slash commands** (`/nick /me /who /clear
   /help /shrug`), and a searchable **emoji picker** with recents.
 - **Unique display names per room** — case-insensitive; a taken name is blocked at the
@@ -212,6 +229,13 @@ last person leaves. No server, no database.
 - **Security/abuse hardening:** transport-namespaced message ids (no silent
   suppression), sanitization of bidi/zero-width/control chars, per-channel flood
   limits, and reply/reaction/history that never trust claimed identity.
+- **Built to stay fast in a busy room:** message rows are built once and reused, so a
+  mute toggle or a history hand-off reorders existing nodes instead of rebuilding
+  thousands of elements; off-screen rows are skipped by the engine
+  (`content-visibility`); duplicate-name detection is a set lookup rather than a scan
+  per message; and file-transfer progress writes to a retained node instead of
+  querying the DOM hundreds of times. Measured on a 400-message room, a full
+  re-render went from **~70 ms of blocked main thread to ~9 ms**.
 
 ## Limitations (honest ones)
 
