@@ -5,8 +5,11 @@
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-uyzV0T7moysrkWGRMTBwh0VSXzW3adxeDAaZxi8ozZQ=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-P8Y2PiOU/Lv1j1xIh8IIFpxmRF6eu0Z0fVfN6IgBEFA=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
+  <!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the LAYOUT
+       viewport too, so the app keeps fitting and the header can't be scrolled away
+       (Android/Chrome). iOS ignores it — app.js measures visualViewport there. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />
   <title>Global Free Speech · live p2p chat</title>
@@ -87,7 +90,7 @@ button { font-family: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
 /* ===================== gate ===================== */
-.gate { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--bg) 52%, transparent); backdrop-filter: blur(10px); }
+.gate { position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); z-index: 50; display: grid; place-items: center; padding: 24px; overflow-y: auto; background: color-mix(in srgb, var(--bg) 52%, transparent); backdrop-filter: blur(10px); }
 .gate[hidden] { display: none; }
 .gate-card {
   width: min(440px,100%); position: relative;
@@ -134,7 +137,9 @@ button { font-family: inherit; color: inherit; }
 .renamecard .gate-btn { margin-top: 12px; }
 
 /* ===================== app shell ===================== */
-.app { display: flex; flex-direction: column; height: 100dvh; }
+/* --app-h tracks the *visible* height (set from visualViewport in app.js) so an
+   open keyboard shrinks the app instead of pushing the header off the screen */
+.app { display: flex; flex-direction: column; height: var(--app-h, 100dvh); }
 .app[hidden] { display: none; }
 /* NOTE: no backdrop-filter here — it would create a stacking context on the topbar
    (which paints before .body), pushing the dropdown popovers behind the chat. */
@@ -1304,6 +1309,38 @@ function appendOne(entry, stick) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Mobile keyboard — keep the header on screen
+ *
+ * A software keyboard shrinks the VISUAL viewport but leaves the layout
+ * viewport (and 100dvh) alone, so the app ends up taller than what you can
+ * see and the browser scrolls the whole page up to reveal the composer —
+ * taking the top bar with it. Driving the app's height from
+ * visualViewport.height keeps it exactly as tall as the visible area, and
+ * undoing any page scroll pins the header at the top. (Android also gets
+ * interactive-widget=resizes-content from the viewport meta.)
+ * ------------------------------------------------------------------ */
+let keepAtBottom = true
+function initViewportFit() {
+  const vv = window.visualViewport
+  if (!vv) return
+  let pending = 0
+  const fit = () => {
+    cancelAnimationFrame(pending)
+    pending = requestAnimationFrame(() => {
+      document.documentElement.style.setProperty('--app-h', Math.round(vv.height) + 'px')
+      // the document itself must never scroll — that is what hides the header
+      if (window.scrollY || window.scrollX) window.scrollTo(0, 0)
+      // the keyboard shouldn't push the latest message out of view
+      if (keepAtBottom && entered) messagesEl.scrollTop = messagesEl.scrollHeight
+    })
+  }
+  vv.addEventListener('resize', fit, {passive: true})
+  vv.addEventListener('scroll', fit, {passive: true})
+  window.addEventListener('orientationchange', () => setTimeout(fit, 300), {passive: true})
+  fit()
+}
+
+/* ------------------------------------------------------------------ *
  * Scroll-to-latest
  * ------------------------------------------------------------------ */
 let awayCount = 0
@@ -1316,7 +1353,10 @@ jumpBtn.addEventListener('click', () => {
   messagesEl.scrollTo({top: messagesEl.scrollHeight, behavior: 'smooth'})
   hideJump(); clearUnreadMarker()
 })
-messagesEl.addEventListener('scroll', () => { if (isNearBottom()) hideJump() }, {passive: true})
+messagesEl.addEventListener('scroll', () => {
+  keepAtBottom = isNearBottom()   // remember, so a keyboard resize doesn't yank you around
+  if (keepAtBottom) hideJump()
+}, {passive: true})
 function clearUnreadMarker() {
   if (unreadMarkerId === null) return
   unreadMarkerId = null
@@ -2486,7 +2526,7 @@ async function joinWithNameCheck() {
  * Boot
  * ------------------------------------------------------------------ */
 function boot() {
-  applyTheme(); applyBlur(); applySound(); applyNotify()
+  applyTheme(); applyBlur(); applySound(); applyNotify(); initViewportFit()
   nickInput.maxLength = CONFIG.maxNameLen
   inputEl.maxLength = CONFIG.maxMsgLen
   // the keyboard hint only fits on wide screens

@@ -6,7 +6,10 @@
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src __CSP_SCRIPT__; connect-src __CSP_CONNECT__; base-uri 'none'; form-action 'none'" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the LAYOUT
+       viewport too, so the app keeps fitting and the header can't be scrolled away
+       (Android/Chrome). iOS ignores it — app.js measures visualViewport there. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="description" content="Global Free Speech — live, anonymous, peer-to-peer chat. No accounts, no servers, no history." />
   <meta name="color-scheme" content="dark light" />
   <title>Global Free Speech · live p2p chat</title>
