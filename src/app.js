@@ -132,6 +132,8 @@ const scrim = $('#scrim'), meName = $('#me-name'), meDot = $('#me-dot')
 const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
 const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomErrEl = $('#room-err'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
 const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
+const soundBtn = $('#sound-btn'), notifyBtn = $('#notify-btn')
+const lightbox = $('#lightbox'), lightboxImg = $('#lightbox-img'), lightboxDl = $('#lightbox-dl'), lightboxName = $('#lightbox-name'), lightboxClose = $('#lightbox-close')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 const renameModal = $('#rename'), renameForm = $('#rename-form'), renameMsg = $('#rename-msg'), renameInput = $('#rename-input'), renameErr = $('#rename-err')
 
@@ -149,6 +151,9 @@ const muted = new Set()            // peerIds muted this session (ephemeral)
 const reactions = new Map()        // msgKey -> Map(emoji -> Set(peerId))
 const timeline = []                // sorted by (t, id); {kind:'msg'|'sys', id, t, ...}
 const seenIds = new Set()
+const entryById = new Map()        // id -> entry (O(1); timeline stays the ordered source)
+const nodeCache = new Map()        // id -> {k, el} — rendered rows, reused across re-renders
+let unreadMarkerId = null          // first message that arrived while you were away
 let seq = 0
 let iTyping = false, typingSentAt = 0, typingStopTimer = null
 let myPresence = 'active', idleTimer = null
@@ -258,13 +263,20 @@ function doRename() {
   addSystem(`You renamed from "${old}" to "${myName}".`)
   closeRenameModal()
 }
-// names are unauthenticated → still visually flag if two VISIBLE peers share one
-function nameIsDuplicated(peerId, name) {
-  if (!name) return false
-  let n = sameName(myName, name) ? 1 : 0
-  for (const [id, p] of peers) { if (!isMuted(id) && sameName(p.name, name)) n++ }
-  return n > 1
+// Names are unauthenticated → still visually flag if two VISIBLE peers share one.
+// The duplicate set is recomputed only when the roster changes, so rendering a
+// message is an O(1) lookup instead of a scan over every peer.
+let dupNames = new Set()
+function refreshDupNames() {
+  const counts = new Map()
+  const add = n => { if (!n) return; const k = String(n).trim().toLowerCase(); counts.set(k, (counts.get(k) || 0) + 1) }
+  add(myName)
+  for (const [id, p] of peers) if (!isMuted(id)) add(p.name)
+  const next = new Set()
+  for (const [k, c] of counts) if (c > 1) next.add(k)
+  dupNames = next
 }
+const nameIsDuplicated = name => !!name && dupNames.has(String(name).trim().toLowerCase())
 
 /* ------------------------------------------------------------------ *
  * Timeline (single source of truth)
@@ -276,11 +288,13 @@ function addEntry(entry) {
   let i = timeline.length
   while (i > 0 && cmp(timeline[i - 1], entry) > 0) i--
   timeline.splice(i, 0, entry)
+  if (entry.id) entryById.set(entry.id, entry)
   const atEnd = i === timeline.length - 1
   let evicted = false
   while (timeline.length > CONFIG.maxRendered) {
     const r = timeline.shift()
     evicted = true
+    entryById.delete(r.id); nodeCache.delete(r.id)   // drop the retained DOM row too
     if (r.kind === 'msg') reactions.delete(r.id)
     if (r.kind === 'file' && r.url) URL.revokeObjectURL(r.url)   // free the blob (ephemeral)
     // Do NOT delete r.id from seenIds — keeping dedup stable stops an evicted
@@ -295,22 +309,51 @@ function visibleEntries() {
   return timeline.filter(e => e.kind === 'sys' || !isMuted(e.peerId))   // mute hides msg + file
 }
 
+// Rows are built once and cached by entry id. A re-render (mute, history burst,
+// file event) then reorders existing nodes instead of rebuilding thousands of
+// elements — the cache key covers everything a row's markup depends on, so a
+// changed row is rebuilt and an unchanged one is reused.
+function nodeFor(e, grouped) {
+  const dup = e.peerId !== selfId && nameIsDuplicated(e.name)
+  const k = `${grouped ? 1 : 0}|${e.name}|${dup ? 1 : 0}|${e.url ? 1 : 0}|${e.progress || 0}`
+  const hit = nodeCache.get(e.id)
+  if (hit && hit.k === k) return hit.el
+  const el = e.kind === 'file' ? fileNode(e, grouped) : msgNode(e, grouped)
+  nodeCache.set(e.id, {k, el})
+  return el
+}
+function sysFor(e) {
+  const hit = nodeCache.get(e.id)
+  if (hit && hit.k === 'sys') return hit.el
+  const el = sysNode(e.text)
+  nodeCache.set(e.id, {k: 'sys', el})
+  return el
+}
+
 function renderTimeline({stick} = {}) {
   const atBottom = stick ?? isNearBottom()
   const prevTop = messagesEl.scrollTop
   const frag = document.createDocumentFragment()
   let last = null, lastT = 0
   for (const e of visibleEntries()) {
-    if (e.kind === 'sys') { frag.appendChild(sysNode(e.text)); last = null; lastT = e.t; continue }
+    if (e.id === unreadMarkerId) frag.appendChild(unreadDivider())
+    if (e.kind === 'sys') { frag.appendChild(sysFor(e)); last = null; lastT = e.t; continue }
     if (lastT && e.t - lastT > CONFIG.gapDividerMs) { frag.appendChild(sysNode(timeLabel(e.t))); last = null }
     const grouped = last === e.peerId && !e.emote
-    frag.appendChild(e.kind === 'file' ? fileNode(e, grouped) : msgNode(e, grouped))
+    frag.appendChild(nodeFor(e, grouped))
     last = e.emote ? null : e.peerId; lastT = e.t
   }
   messagesEl.replaceChildren(frag)
   messagesEl.scrollTop = atBottom ? messagesEl.scrollHeight : prevTop
   if (atBottom) hideJump()
   refreshEmpty()
+}
+
+function unreadDivider() {
+  const el = document.createElement('div')
+  el.className = 'unread-div'
+  el.textContent = 'New messages'
+  return el
 }
 
 function timeLabel(t) {
@@ -354,12 +397,13 @@ function msgNode(e, grouped) {
   who.style.color = self ? '' : colorOf(e.peerId)
   who.textContent = self ? 'You' : e.name
   meta.appendChild(who)
-  if (!self && nameIsDuplicated(e.peerId, e.name)) meta.appendChild(badge(e.peerId))
+  if (!self && nameIsDuplicated(e.name)) meta.appendChild(badge(e.peerId))
   const time = document.createElement('span')
   time.className = 'time'
   time.textContent = fmtTime(e.t)
   time.title = relTime(e.t)
   meta.appendChild(time)
+  if (self) { const tk = document.createElement('span'); paintTick(tk, e.status); meta.appendChild(tk) }
   stack.appendChild(meta)
 
   if (e.reply) stack.appendChild(replyQuote(e.reply))
@@ -384,6 +428,26 @@ function msgNode(e, grouped) {
 
   row.appendChild(stack)
   return row
+}
+
+/* ----- delivery state for your own messages (patched in place) ---- */
+const TICKS = {
+  sending: ['◌', 'Sending…'],
+  sent: ['✓', 'Sent to everyone here'],
+  alone: ['·', 'No one else is here yet — nobody received this'],
+  failed: ['⚠', 'Could not send — check the connection'],
+}
+function paintTick(el, status) {
+  const [glyph, title] = TICKS[status] || TICKS.sending
+  el.className = 'tick tick--' + (status || 'sending')
+  el.textContent = glyph
+  el.title = title
+}
+function setMsgStatus(entry, status) {
+  entry.status = status
+  const hit = nodeCache.get(entry.id)
+  const el = hit && hit.el.querySelector('.tick')
+  if (el) paintTick(el, status)
 }
 
 function badge(peerId) {
@@ -523,7 +587,17 @@ function msgTools(e) {
   reply.type = 'button'; reply.className = 'mt'; reply.textContent = '↩'; reply.title = 'Reply'
   reply.setAttribute('aria-label', 'Reply to message')
   reply.addEventListener('click', ev => { ev.stopPropagation(); startReply(e) })
-  t.append(react, reply)
+  const copy = document.createElement('button')
+  copy.type = 'button'; copy.className = 'mt'; copy.textContent = '⧉'; copy.title = 'Copy text'
+  copy.setAttribute('aria-label', 'Copy message text')
+  copy.addEventListener('click', ev => {
+    ev.stopPropagation()
+    writeClipboard(e.text).then(ok => {
+      copy.textContent = ok ? '✓' : '✕'
+      setTimeout(() => { copy.textContent = '⧉' }, 1100)
+    })
+  })
+  t.append(react, reply, copy)
   return t
 }
 let reactMenu = null
@@ -537,7 +611,12 @@ function openReactMenu(anchor, key) {
     b.addEventListener('click', () => { toggleReaction(key, em); closeReactMenu() })
     reactMenu.appendChild(b)
   })
-  anchor.appendChild(reactMenu)
+  // portaled to <body>: a popup nested in a paint-contained row would be clipped
+  document.body.appendChild(reactMenu)
+  const r = anchor.getBoundingClientRect(), m = reactMenu.getBoundingClientRect()
+  const top = r.bottom + 6 + m.height > innerHeight ? r.top - m.height - 6 : r.bottom + 6
+  reactMenu.style.top = Math.max(8, top) + 'px'
+  reactMenu.style.left = Math.max(8, Math.min(r.left, innerWidth - m.width - 8)) + 'px'
   setTimeout(() => document.addEventListener('click', closeReactMenu, {once: true}), 0)
 }
 function closeReactMenu() { if (reactMenu) { reactMenu.remove(); reactMenu = null } }
@@ -591,23 +670,31 @@ function addMessage(entry, fromSelf) {
   // fast path only when the entry lands at the end AND nothing was evicted (so the
   // DOM stays in lockstep with the timeline); otherwise do a full, correct render.
   const fast = res.atEnd && !res.evicted && !isMuted(entry.peerId) && messagesEl.firstElementChild && emptyEl.hidden
+  // mark where "away" reading should resume, before the row is placed
+  if (!fromSelf && !isMuted(entry.peerId) && unreadMarkerId === null && (document.hidden || !stick)) unreadMarkerId = entry.id
   if (fast) appendOne(entry, stick); else renderTimeline({stick})
   if (!fromSelf && !isMuted(entry.peerId)) {
     announceMsg(`${entry.name}: ${entry.text}`)
-    if (document.hidden) setUnread(unread + 1)
+    chime()
+    if (document.hidden) { setUnread(unread + 1); notifyDesktop(entry.name, entry.text) }
   }
-  if (!stick && !fromSelf) showJump()
+  if (!stick && !fromSelf) { awayCount++; showJump() }
   return true
 }
 
 function appendOne(entry, stick) {
-  // grouping + gap divider derived from the timeline (not the DOM), so it stays correct
-  const vis = visibleEntries()
-  const idx = vis.findIndex(e => e.id === entry.id)
-  const prev = idx > 0 ? vis[idx - 1] : null
+  // grouping + gap divider derived from the timeline (not the DOM), so it stays
+  // correct; the previous visible entry is found by walking back from the end
+  // rather than materialising and scanning the whole visible list.
+  let prev = null
+  for (let i = timeline.length - 2; i >= 0; i--) {
+    const e = timeline[i]
+    if (e.kind === 'sys' || !isMuted(e.peerId)) { prev = e; break }
+  }
+  if (entry.id === unreadMarkerId) messagesEl.appendChild(unreadDivider())
   if (prev && prev.kind === 'msg' && entry.t - prev.t > CONFIG.gapDividerMs) messagesEl.appendChild(sysNode(timeLabel(entry.t)))
   const grouped = !!prev && prev.kind === 'msg' && !prev.emote && !entry.emote && prev.peerId === entry.peerId && entry.t - prev.t <= CONFIG.gapDividerMs
-  const node = msgNode(entry, grouped)
+  const node = nodeFor(entry, grouped)
   node.classList.add('msg--new')
   messagesEl.appendChild(node)
   if (stick) messagesEl.scrollTop = messagesEl.scrollHeight
@@ -616,10 +703,22 @@ function appendOne(entry, stick) {
 /* ------------------------------------------------------------------ *
  * Scroll-to-latest
  * ------------------------------------------------------------------ */
-function showJump() { jumpBtn.hidden = false }
-function hideJump() { jumpBtn.hidden = true }
-jumpBtn.addEventListener('click', () => { messagesEl.scrollTop = messagesEl.scrollHeight; hideJump() })
-messagesEl.addEventListener('scroll', () => { if (isNearBottom()) hideJump() })
+let awayCount = 0
+function showJump() {
+  jumpBtn.textContent = awayCount ? `↓ ${awayCount} new message${awayCount > 1 ? 's' : ''}` : '↓ New messages'
+  jumpBtn.hidden = false
+}
+function hideJump() { jumpBtn.hidden = true; awayCount = 0 }
+jumpBtn.addEventListener('click', () => {
+  messagesEl.scrollTo({top: messagesEl.scrollHeight, behavior: 'smooth'})
+  hideJump(); clearUnreadMarker()
+})
+messagesEl.addEventListener('scroll', () => { if (isNearBottom()) hideJump() }, {passive: true})
+function clearUnreadMarker() {
+  if (unreadMarkerId === null) return
+  unreadMarkerId = null
+  renderTimeline({stick: isNearBottom()})
+}
 
 /* ------------------------------------------------------------------ *
  * Files & images — peer-to-peer, ephemeral (Trystero binary transfer)
@@ -633,7 +732,7 @@ function fmtBytes(n) {
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
   return (i ? n.toFixed(1) : n) + ' ' + u[i]
 }
-const findEntry = key => timeline.find(x => x.id === key)
+const findEntry = key => entryById.get(key)
 
 function fileNode(e, grouped) {
   const self = e.peerId === selfId
@@ -653,10 +752,11 @@ function fileNode(e, grouped) {
     note.textContent = (self ? 'Sending ' : 'Receiving ') + (e.fileName || 'file') + '…'
     const prog = document.createElement('div'); prog.className = 'fileprog'
     const bar = document.createElement('i'); bar.style.width = Math.round((e.progress || 0) * 100) + '%'; prog.appendChild(bar)
+    e.bar = bar   // keep a handle so progress updates skip the DOM query
     bubble.append(note, prog)
   } else if (isImageType(e.fileType)) {           // inline image
-    const img = document.createElement('img'); img.className = 'filemsg-img'; img.src = e.url; img.alt = e.fileName || 'image'; img.loading = 'lazy'
-    img.addEventListener('click', () => window.open(e.url, '_blank', 'noopener'))
+    const img = document.createElement('img'); img.className = 'filemsg-img'; img.src = e.url; img.alt = e.fileName || 'image'; img.loading = 'lazy'; img.decoding = 'async'
+    img.addEventListener('click', () => openLightbox(e.url, e.fileName || 'image'))
     bubble.appendChild(img)
   } else {                                         // download card
     const card = document.createElement('div'); card.className = 'filecard'
@@ -680,9 +780,11 @@ function addFileEntry(entry, fromSelf) {
 // Update a visible progress bar in place — a 10 MB transfer fires hundreds of
 // progress events, and a full renderTimeline() per chunk freezes slow devices.
 let progRenderLast = 0
-function updateFileProgress(key, pct) {
-  const bar = messagesEl.querySelector(`.msg[data-key="${cssEsc(key)}"] .fileprog i`)
-  if (bar) { bar.style.width = Math.round(pct * 100) + '%'; return }
+function updateFileProgress(entry, pct) {
+  // the bar node is held on the entry, so a 10 MB transfer's hundreds of
+  // progress events cost a style write each instead of a DOM query
+  const bar = entry && entry.bar
+  if (bar && bar.isConnected) { bar.style.width = Math.round(pct * 100) + '%'; return }
   const now = Date.now()   // bar not in the DOM (rare) → throttled full render
   if (now - progRenderLast > 500) { progRenderLast = now; renderTimeline({}) }
 }
@@ -691,7 +793,7 @@ function onFileProgress(pct, peerId, metadata) {
   if (typeof metadata.size === 'number' && metadata.size > CONFIG.maxFileBytes) return
   const key = keyOf(peerId, clampStr(metadata.id, 64))
   const e = findEntry(key)
-  if (e) { e.progress = pct; updateFileProgress(key, pct); return }
+  if (e) { e.progress = pct; updateFileProgress(e, pct); return }
   // each NEW transfer entry costs one slot in the 'file' flood budget, so a peer
   // can't spam fabricated progress metadata into endless "Receiving…" rows
   if (!allow(peerId, 'file')) return
@@ -713,10 +815,36 @@ function onFileComplete(data, peerId, metadata) {
   announceMsg(`${nameOf(peerId)} sent ${isImageType(metadata.type) ? 'an image' : 'a file'}`)
   if (document.hidden) setUnread(unread + 1)
 }
-function sendFile(file) {
+// Downscale + re-encode big photos in the browser before they hit the wire.
+// A 6 MB phone picture becomes ~300 KB, so it arrives in a moment instead of a
+// minute — and pictures that were over the cap now send at all. Pixels never
+// leave the device: this is canvas work, no network, no server.
+const COMPRESS_OVER = 320 * 1024, MAX_EDGE = 1600
+async function maybeCompress(file) {
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml' || file.type === 'image/gif') return file
+  if (file.size < COMPRESS_OVER) return file
+  try {
+    const bmp = await createImageBitmap(file)
+    const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height))
+    const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w; canvas.height = h
+    canvas.getContext('2d', {alpha: false}).drawImage(bmp, 0, 0, w, h)
+    if (bmp.close) bmp.close()
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/webp', 0.82))
+    canvas.width = canvas.height = 0            // release the backing store
+    if (!blob || blob.size >= file.size) return file
+    return new File([blob], file.name.replace(/\.[^.]*$/, '') + '.webp', {type: 'image/webp'})
+  } catch { return file }                        // any failure → send the original
+}
+
+async function sendFile(file) {
   if (!file || !actions) return
-  if (file.size > CONFIG.maxFileBytes) { addSystem(`That file is too big (max ${fmtBytes(CONFIG.maxFileBytes)}).`); return }
   if (file.size === 0) { addSystem('That file is empty.'); return }
+  const originalSize = file.size
+  file = await maybeCompress(file)
+  if (file.size > CONFIG.maxFileBytes) { addSystem(`That file is too big (max ${fmtBytes(CONFIG.maxFileBytes)}).`); return }
+  if (file.size < originalSize * 0.9) addSystem(`Optimised image before sending: ${fmtBytes(originalSize)} → ${fmtBytes(file.size)}.`)
   const rawId = newRawId()
   const meta = {id: rawId, name: clampStr(file.name, 120) || 'file', type: clampStr(file.type, 80), size: file.size, t: Date.now()}
   // my own copy renders instantly (I already hold the bytes)
@@ -724,6 +852,24 @@ function sendFile(file) {
   try { actions.file.send(file, {metadata: meta}) } catch { addSystem('Could not send the file.') }
 }
 function revokeAllFileUrls() { for (const e of timeline) if (e.kind === 'file' && e.url) URL.revokeObjectURL(e.url) }
+
+/* ----- image viewer (local blob, never uploaded anywhere) ---- */
+let lastLbTrigger = null
+function openLightbox(url, name) {
+  lastLbTrigger = document.activeElement
+  lightboxImg.src = url; lightboxImg.alt = name
+  lightboxDl.href = url; lightboxDl.download = name
+  lightboxName.textContent = name
+  lightbox.hidden = false
+  lightboxClose.focus()
+}
+function closeLightbox() {
+  if (lightbox.hidden) return
+  lightbox.hidden = true
+  lightboxImg.removeAttribute('src')   // stop decoding, release memory
+  if (lastLbTrigger && lastLbTrigger.isConnected) lastLbTrigger.focus()
+  lastLbTrigger = null
+}
 
 /* ------------------------------------------------------------------ *
  * Verifiable hearsay — tamper-evident history hand-off.
@@ -897,6 +1043,7 @@ function leaveAndReset() {
   typingTimers.clear(); peers.clear(); floodState.clear(); histAcceptedFrom.clear()
   revokeAllFileUrls()
   reactions.clear(); seenIds.clear(); timeline.length = 0
+  entryById.clear(); nodeCache.clear(); unreadMarkerId = null
   cancelAttestation(); resetDag()
   prevRelays = 0; noPeerSince = 0
 }
@@ -1061,7 +1208,7 @@ const rawIdOf = key => { const i = key.indexOf('::'); return i < 0 ? key : key.s
 
 function parseReply(r) {
   if (!r || typeof r.key !== 'string') return null
-  const own = timeline.find(e => e.id === r.key)
+  const own = entryById.get(r.key)
   // Never trust a peer's claimed quote author/text. If we can't resolve the
   // referenced message in our own timeline, show a neutral placeholder.
   if (!own) return {key: clampStr(r.key, 130), unresolved: true}
@@ -1126,6 +1273,7 @@ function bumpActivity() {
  * Roster
  * ------------------------------------------------------------------ */
 function renderRoster() {
+  refreshDupNames()   // roster changed → recompute the duplicate-name set once
   const count = peers.size + 1
   onlineCountEl.textContent = String(count)
   peopleCountEl.textContent = String(count)
@@ -1144,7 +1292,7 @@ function personRow(id, name, isSelf, presence) {
   const nm = document.createElement('span')
   nm.className = 'pname'; nm.textContent = name || 'connecting…'
   li.append(av, nm)
-  if (!isSelf && name && nameIsDuplicated(id, name)) li.appendChild(badge(id))
+  if (!isSelf && name && nameIsDuplicated(name)) li.appendChild(badge(id))
   if (isSelf) { const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'you'; li.appendChild(tag) }
   else {
     const mb = document.createElement('button')
@@ -1172,12 +1320,26 @@ function sendMessage() {
   if (text[0] === '/' && handleSlash(text)) { inputEl.value = ''; stopTyping(); updateSendBtn(); return }
   const rawId = newRawId()
   const prev = currentHeads().slice(-3)   // weave this message into the room's hash-DAG
-  const entry = {id: keyOf(selfId, rawId), t: Date.now(), peerId: selfId, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null, prev}
+  const entry = {id: keyOf(selfId, rawId), t: Date.now(), peerId: selfId, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null, prev, status: 'sending'}
   entry.wt = entry.t
-  actions.msg.send({id: rawId, t: entry.t, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null, prev})
+  const wire = actions.msg.send({id: rawId, t: entry.t, name: myName, text, reply: replyTo ? {key: replyTo.key, name: replyTo.name, snippet: replyTo.snippet} : null, prev})
   addMessage(entry, true)
   recordMsgHash(entry)
-  inputEl.value = ''; cancelReply(); stopTyping(); updateSendBtn(); inputEl.focus()
+  // honest delivery state: sent to the peers that were connected, or a clear
+  // "nobody was here" instead of a tick that implies someone read it
+  const audience = peers.size
+  Promise.resolve(wire).then(
+    () => setMsgStatus(entry, audience ? 'sent' : 'alone'),
+    () => setMsgStatus(entry, 'failed'))
+  inputEl.value = ''; autoGrow(); cancelReply(); stopTyping(); updateSendBtn(); inputEl.focus()
+}
+
+// Single-row composer that grows with the text (capped, then scrolls).
+// An EMPTY textarea reports its wrapped placeholder in scrollHeight, so falling
+// back to the stylesheet height is what keeps the box one row when cleared.
+function autoGrow() {
+  inputEl.style.height = 'auto'
+  inputEl.style.height = inputEl.value ? Math.min(inputEl.scrollHeight, 132) + 'px' : ''
 }
 
 function handleSlash(text) {
@@ -1204,7 +1366,7 @@ function handleSlash(text) {
       return true
     }
     case 'who': addSystem('Here now: ' + [myName + ' (you)', ...[...peers.values()].map(p => p.name).filter(Boolean)].join(', ')); return true
-    case 'clear': revokeAllFileUrls(); timeline.length = 0; seenIds.clear(); reactions.clear(); renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
+    case 'clear': revokeAllFileUrls(); timeline.length = 0; seenIds.clear(); entryById.clear(); nodeCache.clear(); reactions.clear(); unreadMarkerId = null; renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
     case 'shrug': inputEl.value = '¯\\_(ツ)_/¯'; sendMessage(); return true
     case 'help': addSystem('Commands: /nick <name> · /me <action> · /who · /clear · /shrug · /help'); return true
     default: addSystem(`Unknown command: /${cmd} — try /help`); return true
@@ -1212,7 +1374,7 @@ function handleSlash(text) {
 }
 
 function onLocalInput() {
-  updateSendBtn(); bumpActivity()
+  updateSendBtn(); autoGrow(); bumpActivity()
   if (!actions) return
   if (inputEl.value.trim()) {
     const now = Date.now()
@@ -1236,6 +1398,7 @@ function relayStates() {
 }
 function updateStatusLoop() {
   const tick = () => {
+    if (document.hidden) return   // no polling work while the tab is in the background
     const states = relayStates()
     const relays = states.filter(s => s.open).length
     const online = peers.size
@@ -1297,15 +1460,29 @@ const EMOJI = [
 ]
 let recents = []
 try { recents = JSON.parse(localStorage.getItem('c2c-emoji') || '[]').filter(x => typeof x === 'string').slice(0, 16) } catch {}
+// The full grid is built once; filtering only flips `hidden` on existing cells,
+// so typing in the search box never rebuilds ~90 buttons per keystroke.
+let allCells = null, recentWrap = null, allHead = null
+function buildEmojiOnce() {
+  recentWrap = document.createElement('div'); recentWrap.className = 'emoji-recent'
+  allHead = document.createElement('div'); allHead.className = 'emoji-sec'; allHead.textContent = 'All'
+  emojiGrid.append(recentWrap, allHead)
+  allCells = EMOJI.map(([e, k]) => { const el = emojiCell(e, k); emojiGrid.appendChild(el); return {el, e, k} })
+}
+function renderRecents() {
+  recentWrap.replaceChildren()
+  if (!recents.length) return
+  const head = document.createElement('div'); head.className = 'emoji-sec'; head.textContent = 'Recent'
+  recentWrap.appendChild(head)
+  recents.forEach(e => recentWrap.appendChild(emojiCell(e, e)))
+}
 function buildEmoji(filter) {
-  emojiGrid.replaceChildren()
+  if (!allCells) buildEmojiOnce()
   const f = (filter || '').trim().toLowerCase()
-  if (!f && recents.length) {
-    const head = document.createElement('div'); head.className = 'emoji-sec'; head.textContent = 'Recent'; emojiGrid.appendChild(head)
-    recents.forEach(e => emojiGrid.appendChild(emojiCell(e, e)))
-    const head2 = document.createElement('div'); head2.className = 'emoji-sec'; head2.textContent = 'All'; emojiGrid.appendChild(head2)
-  }
-  EMOJI.filter(([e, k]) => !f || k.includes(f) || e === f).forEach(([e, k]) => emojiGrid.appendChild(emojiCell(e, k)))
+  if (!f) renderRecents()
+  recentWrap.hidden = !!f || !recents.length
+  allHead.hidden = !!f || !recents.length
+  for (const c of allCells) c.el.hidden = !!f && !(c.k.includes(f) || c.e === f)
   rove()
 }
 function emojiCell(e, label) {
@@ -1328,13 +1505,14 @@ function insertAtCursor(text) {
   const pos = Math.min(s + text.length, inputEl.value.length)
   inputEl.setSelectionRange(pos, pos); updateSendBtn()
 }
-// roving tabindex over the emoji buttons
+// roving tabindex over the emoji buttons (visible ones only)
+const emojiButtons = () => [...emojiGrid.querySelectorAll('button:not([hidden])')].filter(b => !b.closest('[hidden]'))
 function rove() {
-  const btns = [...emojiGrid.querySelectorAll('button')]
+  const btns = emojiButtons()
   btns.forEach((b, i) => b.tabIndex = i === 0 ? 0 : -1)
 }
 emojiGrid.addEventListener('keydown', e => {
-  const btns = [...emojiGrid.querySelectorAll('button')]
+  const btns = emojiButtons()
   let i = btns.indexOf(document.activeElement)
   if (i < 0) return
   const cols = Math.max(1, Math.floor(emojiGrid.clientWidth / 40))
@@ -1350,9 +1528,32 @@ emojiGrid.addEventListener('keydown', e => {
  * Rooms / share code
  * ------------------------------------------------------------------ */
 function shareUrl(code = CONFIG.roomCode) { return location.origin + BASE + (code ? '#r=' + code : '') }
+// Clipboard with a fallback: the async API rejects when the document isn't
+// focused or permission is withheld, which used to leave the button silent.
+function selectionCopy(text) {
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text; ta.setAttribute('readonly', '')
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0'
+    document.body.appendChild(ta)
+    ta.select(); ta.setSelectionRange(0, text.length)
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch { return false }
+}
+async function writeClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true }
+  } catch {}
+  return selectionCopy(text)
+}
 function copyText(text, btn, restore) {
-  const done = ok => { if (btn) { btn.textContent = ok ? '✓ Copied' : 'Copy failed'; setTimeout(() => { btn.textContent = restore }, 1400) } }
-  try { navigator.clipboard.writeText(text).then(() => done(true), () => done(false)) } catch { done(false) }
+  writeClipboard(text).then(ok => {
+    if (!btn) return
+    btn.textContent = ok ? '✓ Copied' : 'Copy failed'
+    setTimeout(() => { btn.textContent = restore }, 1400)
+  })
 }
 function openRoomsPanel() {
   if (CONFIG.isDefaultRoom) {
@@ -1403,6 +1604,57 @@ function cycleTheme() {
   try { localStorage.setItem('c2c-theme', theme) } catch {}
   applyTheme()
 }
+/* ----- notification chime (synthesised — no audio asset, no network) ---- */
+let soundOn = false, notifyOn = false, actx = null
+try { soundOn = localStorage.getItem('c2c-sound') === '1' } catch {}
+try { notifyOn = localStorage.getItem('c2c-notify') === '1' } catch {}
+function chime() {
+  if (!soundOn) return
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext
+    if (!AC) return
+    actx = actx || new AC()
+    if (actx.state === 'suspended') actx.resume()
+    const now = actx.currentTime
+    for (const [freq, delay] of [[880, 0], [1318.5, 0.085]]) {
+      const osc = actx.createOscillator(), gain = actx.createGain()
+      osc.type = 'sine'; osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.0001, now + delay)
+      gain.gain.exponentialRampToValueAtTime(0.08, now + delay + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 0.19)
+      osc.connect(gain); gain.connect(actx.destination)
+      osc.start(now + delay); osc.stop(now + delay + 0.2)
+    }
+  } catch {}
+}
+function applySound() { soundBtn.setAttribute('aria-pressed', String(soundOn)); soundBtn.classList.toggle('on', soundOn) }
+function toggleSound() {
+  soundOn = !soundOn
+  try { localStorage.setItem('c2c-sound', soundOn ? '1' : '0') } catch {}
+  applySound(); if (soundOn) chime()   // audible confirmation (also unlocks audio)
+}
+// Desktop notifications: opt-in, background-only, and the body is already
+// sanitized message text. Nothing leaves the device.
+function notifyDesktop(who, text) {
+  if (!notifyOn || !document.hidden || !('Notification' in window) || Notification.permission !== 'granted') return
+  try {
+    const n = new Notification(who, {body: text.slice(0, 140), tag: 'c2c-msg', silent: true, icon: favicon(0)})
+    n.onclick = () => { window.focus(); n.close() }
+  } catch {}
+}
+function applyNotify() { notifyBtn.setAttribute('aria-pressed', String(notifyOn)); notifyBtn.classList.toggle('on', notifyOn) }
+async function toggleNotify() {
+  if (!('Notification' in window)) { addSystem('This browser has no desktop notifications.'); return }
+  if (!notifyOn) {
+    let perm = Notification.permission
+    if (perm === 'default') { try { perm = await Notification.requestPermission() } catch {} }
+    if (perm !== 'granted') { addSystem('Notifications are blocked — allow them in your browser’s site settings.'); return }
+    notifyOn = true
+  } else notifyOn = false
+  try { localStorage.setItem('c2c-notify', notifyOn ? '1' : '0') } catch {}
+  applyNotify()
+}
+
 let safeView = false
 try { safeView = localStorage.getItem('c2c-safe') === '1' } catch {}
 function applyBlur() {
@@ -1426,7 +1678,12 @@ function setUnread(n) {
   let link = document.querySelector('link[rel=icon]')
   if (link) link.href = favicon(n)
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) setUnread(0) })
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return
+  setUnread(0)
+  // leave the "New messages" line up briefly so you can see where you left off
+  setTimeout(() => { if (!document.hidden && isNearBottom()) clearUnreadMarker() }, 4000)
+})
 
 /* ------------------------------------------------------------------ *
  * a11y live region
@@ -1539,6 +1796,10 @@ roomPublicBtn.addEventListener('click', () => { history.replaceState(null, '', B
 
 themeBtn.addEventListener('click', cycleTheme)
 blurBtn.addEventListener('click', toggleBlur)
+soundBtn.addEventListener('click', toggleSound)
+notifyBtn.addEventListener('click', toggleNotify)
+lightboxClose.addEventListener('click', closeLightbox)
+lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox() })
 
 peopleToggle.addEventListener('click', () => peopleEl.classList.contains('open') ? closeAside(peopleEl) : openAside(peopleEl, peopleToggle))
 peopleClose.addEventListener('click', () => closeAside(peopleEl))
@@ -1548,6 +1809,7 @@ scrim.addEventListener('click', closePanels)
 document.addEventListener('keydown', e => {
   if (e.key === 'Tab') trapTab(e)
   if (e.key !== 'Escape') return
+  if (!lightbox.hidden) { closeLightbox(); return }
   if (!emojiPanel.hidden) { emojiPanel.hidden = true; emojiBtn.focus(); return }
   if (!roomsPanel.hidden) { roomsPanel.hidden = true; return }
   if (!statusPanel.hidden) { statusPanel.hidden = true; return }
@@ -1621,9 +1883,15 @@ async function joinWithNameCheck() {
  * Boot
  * ------------------------------------------------------------------ */
 function boot() {
-  applyTheme(); applyBlur()
+  applyTheme(); applyBlur(); applySound(); applyNotify()
   nickInput.maxLength = CONFIG.maxNameLen
   inputEl.maxLength = CONFIG.maxMsgLen
+  // the keyboard hint only fits on wide screens
+  const setPlaceholder = () => {
+    inputEl.placeholder = isDrawer() ? 'Say something…' : 'Say something…  (Shift+Enter for a new line, /help for commands)'
+  }
+  setPlaceholder()
+  window.addEventListener('resize', setPlaceholder, {passive: true})
   buildEmoji('')
   updateSendBtn()
   emptyBtn.addEventListener('click', () => copyText(shareUrl(), emptyBtn, '🔗 Copy invite link'))
