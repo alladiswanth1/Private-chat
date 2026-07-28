@@ -701,6 +701,38 @@ function appendOne(entry, stick) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Mobile keyboard — keep the header on screen
+ *
+ * A software keyboard shrinks the VISUAL viewport but leaves the layout
+ * viewport (and 100dvh) alone, so the app ends up taller than what you can
+ * see and the browser scrolls the whole page up to reveal the composer —
+ * taking the top bar with it. Driving the app's height from
+ * visualViewport.height keeps it exactly as tall as the visible area, and
+ * undoing any page scroll pins the header at the top. (Android also gets
+ * interactive-widget=resizes-content from the viewport meta.)
+ * ------------------------------------------------------------------ */
+let keepAtBottom = true
+function initViewportFit() {
+  const vv = window.visualViewport
+  if (!vv) return
+  let pending = 0
+  const fit = () => {
+    cancelAnimationFrame(pending)
+    pending = requestAnimationFrame(() => {
+      document.documentElement.style.setProperty('--app-h', Math.round(vv.height) + 'px')
+      // the document itself must never scroll — that is what hides the header
+      if (window.scrollY || window.scrollX) window.scrollTo(0, 0)
+      // the keyboard shouldn't push the latest message out of view
+      if (keepAtBottom && entered) messagesEl.scrollTop = messagesEl.scrollHeight
+    })
+  }
+  vv.addEventListener('resize', fit, {passive: true})
+  vv.addEventListener('scroll', fit, {passive: true})
+  window.addEventListener('orientationchange', () => setTimeout(fit, 300), {passive: true})
+  fit()
+}
+
+/* ------------------------------------------------------------------ *
  * Scroll-to-latest
  * ------------------------------------------------------------------ */
 let awayCount = 0
@@ -713,7 +745,10 @@ jumpBtn.addEventListener('click', () => {
   messagesEl.scrollTo({top: messagesEl.scrollHeight, behavior: 'smooth'})
   hideJump(); clearUnreadMarker()
 })
-messagesEl.addEventListener('scroll', () => { if (isNearBottom()) hideJump() }, {passive: true})
+messagesEl.addEventListener('scroll', () => {
+  keepAtBottom = isNearBottom()   // remember, so a keyboard resize doesn't yank you around
+  if (keepAtBottom) hideJump()
+}, {passive: true})
 function clearUnreadMarker() {
   if (unreadMarkerId === null) return
   unreadMarkerId = null
@@ -1883,7 +1918,7 @@ async function joinWithNameCheck() {
  * Boot
  * ------------------------------------------------------------------ */
 function boot() {
-  applyTheme(); applyBlur(); applySound(); applyNotify()
+  applyTheme(); applyBlur(); applySound(); applyNotify(); initViewportFit()
   nickInput.maxLength = CONFIG.maxNameLen
   inputEl.maxLength = CONFIG.maxMsgLen
   // the keyboard hint only fits on wide screens
