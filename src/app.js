@@ -345,7 +345,7 @@ function renderTimeline({stick} = {}) {
   }
   messagesEl.replaceChildren(frag)
   messagesEl.scrollTop = atBottom ? messagesEl.scrollHeight : prevTop
-  if (atBottom) hideJump()
+  if (atBottom) { hideJump(); keepAtBottom = true }
   refreshEmpty()
 }
 
@@ -356,10 +356,16 @@ function unreadDivider() {
   return el
 }
 
+// "14:32" today, "Yesterday · 14:32", "Tuesday · 14:32" within the week —
+// friendlier to read than a bare date when catching up
 function timeLabel(t) {
   const d = new Date(t), now = new Date()
-  const same = d.toDateString() === now.toDateString()
-  return same ? fmtTime(t) : d.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' · ' + fmtTime(t)
+  const dayStart = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((dayStart(now) - dayStart(d)) / 86400000)
+  if (days <= 0) return fmtTime(t)
+  if (days === 1) return 'Yesterday · ' + fmtTime(t)
+  if (days < 7) return d.toLocaleDateString([], {weekday: 'long'}) + ' · ' + fmtTime(t)
+  return d.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' · ' + fmtTime(t)
 }
 
 function sysNode(text) {
@@ -416,18 +422,59 @@ function msgNode(e, grouped) {
   const rbar = reactionBar(e.id)
   if (rbar) stack.appendChild(rbar)
 
-  // hover toolbar (react + reply); on touch layouts it's shown by tapping the
-  // message instead of hovering, so it never sits permanently over the text
+  // hover toolbar on pointer devices; long-press / swipe-to-reply on touch
   stack.appendChild(msgTools(e))
-  row.addEventListener('click', ev => {
-    if (!isDrawer() || ev.target.closest('.msgtools, a, .react, .replyquote')) return
-    const open = messagesEl.querySelector('.msg.tools-open')
-    if (open && open !== row) open.classList.remove('tools-open')
-    row.classList.toggle('tools-open')
-  })
+  attachTouchGestures(row, e)
 
   row.appendChild(stack)
   return row
+}
+
+/* ----- touch gestures: long-press for tools, swipe right to reply ---- */
+const LONG_PRESS_MS = 420, SWIPE_TRIGGER = 52, SWIPE_MAX = 48
+const buzz = ms => { try { if (navigator.vibrate) navigator.vibrate(ms) } catch {} }
+function openTools(row) {
+  const open = messagesEl.querySelector('.msg.tools-open')
+  if (open && open !== row) open.classList.remove('tools-open')
+  row.classList.add('tools-open')
+}
+function attachTouchGestures(row, entry) {
+  let pressTimer = null, x0 = 0, y0 = 0, dx = 0, tracking = false, swiping = false
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null }
+
+  row.addEventListener('pointerdown', ev => {
+    if (ev.pointerType === 'mouse' || !isDrawer()) return
+    if (ev.target.closest('.msgtools, a, .react, .replyquote, .fdl, .filemsg-img')) return
+    x0 = ev.clientX; y0 = ev.clientY; dx = 0; tracking = true; swiping = false
+    pressTimer = setTimeout(() => { pressTimer = null; tracking = false; openTools(row); buzz(12) }, LONG_PRESS_MS)
+  }, {passive: true})
+
+  row.addEventListener('pointermove', ev => {
+    if (!tracking) return
+    const mx = ev.clientX - x0, my = ev.clientY - y0
+    if (!swiping) {
+      // let a mostly-vertical drag be a normal scroll and give up the gesture
+      if (Math.abs(my) > 10 && Math.abs(my) >= Math.abs(mx)) { tracking = false; cancelPress(); return }
+      if (mx > 10) { swiping = true; cancelPress() } else return
+    }
+    dx = Math.max(0, Math.min(mx - 10, SWIPE_MAX))
+    row.style.transform = 'translateX(' + dx + 'px)'
+    row.classList.toggle('swipe-armed', mx > SWIPE_TRIGGER)
+  }, {passive: true})
+
+  const release = () => {
+    cancelPress()
+    if (swiping) {
+      if (row.classList.contains('swipe-armed')) { startReply(entry); buzz(10) }
+      row.classList.add('swipe-back')
+      row.style.transform = ''
+      setTimeout(() => row.classList.remove('swipe-back'), 200)
+    }
+    row.classList.remove('swipe-armed')
+    tracking = false; swiping = false; dx = 0
+  }
+  row.addEventListener('pointerup', release, {passive: true})
+  row.addEventListener('pointercancel', release, {passive: true})
 }
 
 /* ----- delivery state for your own messages (patched in place) ---- */
@@ -664,7 +711,9 @@ function flushPresenceSys() {
 }
 
 function addMessage(entry, fromSelf) {
-  const stick = fromSelf || isNearBottom()
+  // `keepAtBottom` is maintained by the scroll listener, so the hot path doesn't
+  // have to read scrollTop/scrollHeight (a forced layout) for every message
+  const stick = fromSelf || keepAtBottom
   const res = addEntry({kind: 'msg', ...entry})
   if (!res) return false
   // fast path only when the entry lands at the end AND nothing was evicted (so the
@@ -697,7 +746,16 @@ function appendOne(entry, stick) {
   const node = nodeFor(entry, grouped)
   node.classList.add('msg--new')
   messagesEl.appendChild(node)
-  if (stick) messagesEl.scrollTop = messagesEl.scrollHeight
+  if (stick) stickToBottom()
+}
+
+// Coalesce the scroll-to-bottom into one write per frame: a burst of ten
+// messages in a single tick then costs one layout instead of ten.
+let stickPending = false
+function stickToBottom() {
+  if (stickPending) return
+  stickPending = true
+  requestAnimationFrame(() => { stickPending = false; messagesEl.scrollTop = messagesEl.scrollHeight })
 }
 
 /* ------------------------------------------------------------------ *
@@ -711,7 +769,7 @@ function appendOne(entry, stick) {
  * undoing any page scroll pins the header at the top. (Android also gets
  * interactive-widget=resizes-content from the viewport meta.)
  * ------------------------------------------------------------------ */
-let keepAtBottom = true
+let keepAtBottom = true   // are we pinned to the newest message? (kept fresh on scroll)
 function initViewportFit() {
   const vv = window.visualViewport
   if (!vv) return

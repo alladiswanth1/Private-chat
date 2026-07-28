@@ -205,8 +205,13 @@ last person leaves. No server, no database.
 - **Delivery state on your own messages** — `◌` while sending, `✓` once it reached the
   people present, and an honest `·` ("no one else is here yet") instead of a tick that
   pretends someone received it.
-- **Copy any message** from the hover/tap toolbar (with a fallback for browsers that
+- **Copy any message** from the message toolbar (with a fallback for browsers that
   refuse the async clipboard).
+- **Touch gestures** — **swipe a message right to reply**, **long-press** for the
+  react/reply/copy toolbar (a plain tap just dismisses the keyboard, as it should),
+  each with a light haptic tap where the device supports it.
+- **Readable date separators** — `Yesterday · 14:32`, `Tuesday · 09:05`, and just the
+  time for today.
 - **Come-back-later cues** — a **"New messages"** divider marks where you left off, and
   the jump button counts what you missed (*"↓ 3 new messages"*).
 - **Optional chime & desktop notifications** — both off by default, both opt-in from
@@ -234,9 +239,13 @@ last person leaves. No server, no database.
   mute toggle or a history hand-off reorders existing nodes instead of rebuilding
   thousands of elements; off-screen rows are skipped by the engine
   (`content-visibility`); duplicate-name detection is a set lookup rather than a scan
-  per message; and file-transfer progress writes to a retained node instead of
-  querying the DOM hundreds of times. Measured on a 400-message room, a full
-  re-render went from **~70 ms of blocked main thread to ~9 ms**.
+  per message; file-transfer progress writes to a retained node instead of querying
+  the DOM hundreds of times; and sticking to the newest message is coalesced into one
+  scroll write per frame, so a burst of ten messages costs one layout instead of ten.
+  Measured on a 400-message room: a full re-render went from **~63 ms of blocked main
+  thread to ~7 ms**, and on a 6×-throttled CPU (mid-range phone proxy) incoming
+  messages went from **4.8 ms to 2.6 ms each** and first paint from **870 ms to
+  640 ms**.
 
 ## Limitations (honest ones)
 

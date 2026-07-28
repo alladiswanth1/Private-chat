@@ -5,7 +5,7 @@
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-P8Y2PiOU/Lv1j1xIh8IIFpxmRF6eu0Z0fVfN6IgBEFA=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-aOxXrBAdxDw9gq2fIfTgPGl3Sad+Rf1WK3XbfM3TEbo=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
   <!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the LAYOUT
        viewport too, so the app keeps fitting and the header can't be scrolled away
        (Android/Chrome). iOS ignores it — app.js measures visualViewport there. -->
@@ -244,7 +244,7 @@ button { font-family: inherit; color: inherit; }
 .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 /* scroll-behavior stays auto: sticking to the bottom on every incoming message
    must be instant. Smooth scrolling is applied per-call for jump/reply only. */
-.messages { flex: 1; overflow-y: auto; padding: 18px clamp(12px,4vw,44px) 10px; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; overscroll-behavior: contain; }
+.messages { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 18px clamp(12px,4vw,44px) 10px; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; overscroll-behavior: contain; }
 .messages::-webkit-scrollbar { width: 9px; } .messages::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
 .sys { align-self: center; margin: 9px 0; color: var(--txt-faint); font-size: 12px; background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line-soft); padding: 4px 13px; border-radius: 999px; max-width: 90%; text-align: center; }
 .sys.emote { font-style: italic; color: var(--txt-dim); background: transparent; border: none; max-width: min(78%,720px); }
@@ -266,7 +266,11 @@ button { font-family: inherit; color: inherit; }
    out of view (the intrinsic size keeps the scrollbar honest). padding-top
    carries the hover toolbar INSIDE the row box, since content-visibility also
    applies paint containment and would otherwise clip a negative offset. */
-.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; content-visibility: auto; contain-intrinsic-size: auto 64px; }
+/* touch-action: pan-y keeps vertical scrolling native while letting a
+   horizontal drag become the swipe-to-reply gesture */
+.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; content-visibility: auto; contain-intrinsic-size: auto 64px; touch-action: pan-y; }
+.msg.swipe-back { transition: transform .18s ease; }
+.msg.swipe-armed .bubble { box-shadow: -3px 0 0 0 var(--accent), 0 4px 18px rgba(92,100,255,.35); }
 /* grouped rows keep their tight 2px gap, but still reserve the 10px of padding
    the toolbar lives in — the negative margin cancels it out visually */
 .msg.cont { margin-top: -8px; padding-top: 10px; } .msg.flash .bubble { animation: flash 1.2s ease; }
@@ -330,7 +334,11 @@ button { font-family: inherit; color: inherit; }
 /* message tools (hover/focus) */
 .msgtools { position: absolute; top: 0; right: 8px; display: none; gap: 2px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); border: 1px solid var(--line); border-radius: 999px; padding: 2px; box-shadow: var(--shadow-sm); z-index: 2; }
 .msg.me .msgtools { right: auto; left: 8px; }
-.msg:hover .msgtools, .msg:focus-within .msgtools { display: flex; }
+/* Hover only where hovering is real. Touch browsers leave :hover stuck on the
+   last-tapped element, which used to pop this toolbar open and then swallow the
+   next tap (it sits over the bubble). Touch opens it via long-press instead. */
+@media (hover: hover) and (pointer: fine) { .msg:hover .msgtools { display: flex; } }
+.msg:focus-within .msgtools, .msg.tools-open .msgtools { display: flex; }
 .mt { width: 26px; height: 26px; border: none; background: none; border-radius: 50%; cursor: pointer; font-size: 14px; }
 .mt:hover { background: var(--panel-3); }
 /* portaled to <body>
@@ -424,9 +432,6 @@ button { font-family: inherit; color: inherit; }
   .composer { padding-left: 12px; padding-right: 12px; } .emoji-panel { left: 12px; } .emoji-grid { grid-template-columns: repeat(7,1fr); }
   /* 16px inputs stop iOS Safari from auto-zooming on focus */
   .input, .room-input, .emoji-search { font-size: 16px; }
-  /* no hover on touch: tools appear on tap (see msgNode), never permanently over the text */
-  .msgtools { display: none; }
-  .msg.tools-open .msgtools { display: flex; }
 }
 @media (max-width: 380px) { .headline { font-size: 12px; } .tb-right { gap: 6px; } .iconpill, .status { padding: 6px 7px; } }
 
@@ -954,7 +959,7 @@ function renderTimeline({stick} = {}) {
   }
   messagesEl.replaceChildren(frag)
   messagesEl.scrollTop = atBottom ? messagesEl.scrollHeight : prevTop
-  if (atBottom) hideJump()
+  if (atBottom) { hideJump(); keepAtBottom = true }
   refreshEmpty()
 }
 
@@ -965,10 +970,16 @@ function unreadDivider() {
   return el
 }
 
+// "14:32" today, "Yesterday · 14:32", "Tuesday · 14:32" within the week —
+// friendlier to read than a bare date when catching up
 function timeLabel(t) {
   const d = new Date(t), now = new Date()
-  const same = d.toDateString() === now.toDateString()
-  return same ? fmtTime(t) : d.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' · ' + fmtTime(t)
+  const dayStart = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((dayStart(now) - dayStart(d)) / 86400000)
+  if (days <= 0) return fmtTime(t)
+  if (days === 1) return 'Yesterday · ' + fmtTime(t)
+  if (days < 7) return d.toLocaleDateString([], {weekday: 'long'}) + ' · ' + fmtTime(t)
+  return d.toLocaleDateString([], {month: 'short', day: 'numeric'}) + ' · ' + fmtTime(t)
 }
 
 function sysNode(text) {
@@ -1025,18 +1036,59 @@ function msgNode(e, grouped) {
   const rbar = reactionBar(e.id)
   if (rbar) stack.appendChild(rbar)
 
-  // hover toolbar (react + reply); on touch layouts it's shown by tapping the
-  // message instead of hovering, so it never sits permanently over the text
+  // hover toolbar on pointer devices; long-press / swipe-to-reply on touch
   stack.appendChild(msgTools(e))
-  row.addEventListener('click', ev => {
-    if (!isDrawer() || ev.target.closest('.msgtools, a, .react, .replyquote')) return
-    const open = messagesEl.querySelector('.msg.tools-open')
-    if (open && open !== row) open.classList.remove('tools-open')
-    row.classList.toggle('tools-open')
-  })
+  attachTouchGestures(row, e)
 
   row.appendChild(stack)
   return row
+}
+
+/* ----- touch gestures: long-press for tools, swipe right to reply ---- */
+const LONG_PRESS_MS = 420, SWIPE_TRIGGER = 52, SWIPE_MAX = 48
+const buzz = ms => { try { if (navigator.vibrate) navigator.vibrate(ms) } catch {} }
+function openTools(row) {
+  const open = messagesEl.querySelector('.msg.tools-open')
+  if (open && open !== row) open.classList.remove('tools-open')
+  row.classList.add('tools-open')
+}
+function attachTouchGestures(row, entry) {
+  let pressTimer = null, x0 = 0, y0 = 0, dx = 0, tracking = false, swiping = false
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null }
+
+  row.addEventListener('pointerdown', ev => {
+    if (ev.pointerType === 'mouse' || !isDrawer()) return
+    if (ev.target.closest('.msgtools, a, .react, .replyquote, .fdl, .filemsg-img')) return
+    x0 = ev.clientX; y0 = ev.clientY; dx = 0; tracking = true; swiping = false
+    pressTimer = setTimeout(() => { pressTimer = null; tracking = false; openTools(row); buzz(12) }, LONG_PRESS_MS)
+  }, {passive: true})
+
+  row.addEventListener('pointermove', ev => {
+    if (!tracking) return
+    const mx = ev.clientX - x0, my = ev.clientY - y0
+    if (!swiping) {
+      // let a mostly-vertical drag be a normal scroll and give up the gesture
+      if (Math.abs(my) > 10 && Math.abs(my) >= Math.abs(mx)) { tracking = false; cancelPress(); return }
+      if (mx > 10) { swiping = true; cancelPress() } else return
+    }
+    dx = Math.max(0, Math.min(mx - 10, SWIPE_MAX))
+    row.style.transform = 'translateX(' + dx + 'px)'
+    row.classList.toggle('swipe-armed', mx > SWIPE_TRIGGER)
+  }, {passive: true})
+
+  const release = () => {
+    cancelPress()
+    if (swiping) {
+      if (row.classList.contains('swipe-armed')) { startReply(entry); buzz(10) }
+      row.classList.add('swipe-back')
+      row.style.transform = ''
+      setTimeout(() => row.classList.remove('swipe-back'), 200)
+    }
+    row.classList.remove('swipe-armed')
+    tracking = false; swiping = false; dx = 0
+  }
+  row.addEventListener('pointerup', release, {passive: true})
+  row.addEventListener('pointercancel', release, {passive: true})
 }
 
 /* ----- delivery state for your own messages (patched in place) ---- */
@@ -1273,7 +1325,9 @@ function flushPresenceSys() {
 }
 
 function addMessage(entry, fromSelf) {
-  const stick = fromSelf || isNearBottom()
+  // `keepAtBottom` is maintained by the scroll listener, so the hot path doesn't
+  // have to read scrollTop/scrollHeight (a forced layout) for every message
+  const stick = fromSelf || keepAtBottom
   const res = addEntry({kind: 'msg', ...entry})
   if (!res) return false
   // fast path only when the entry lands at the end AND nothing was evicted (so the
@@ -1306,7 +1360,16 @@ function appendOne(entry, stick) {
   const node = nodeFor(entry, grouped)
   node.classList.add('msg--new')
   messagesEl.appendChild(node)
-  if (stick) messagesEl.scrollTop = messagesEl.scrollHeight
+  if (stick) stickToBottom()
+}
+
+// Coalesce the scroll-to-bottom into one write per frame: a burst of ten
+// messages in a single tick then costs one layout instead of ten.
+let stickPending = false
+function stickToBottom() {
+  if (stickPending) return
+  stickPending = true
+  requestAnimationFrame(() => { stickPending = false; messagesEl.scrollTop = messagesEl.scrollHeight })
 }
 
 /* ------------------------------------------------------------------ *
@@ -1320,7 +1383,7 @@ function appendOne(entry, stick) {
  * undoing any page scroll pins the header at the top. (Android also gets
  * interactive-widget=resizes-content from the viewport meta.)
  * ------------------------------------------------------------------ */
-let keepAtBottom = true
+let keepAtBottom = true   // are we pinned to the newest message? (kept fresh on scroll)
 function initViewportFit() {
   const vv = window.visualViewport
   if (!vv) return
