@@ -234,6 +234,15 @@ last person leaves. No server, no database.
   **unread tab badge**.
 - **Light / dark / system theme**, **safe-view blur**, **who's-online** list, community
   guidelines, connection + relay/latency panel, and an honest IP-exposure notice.
+- **"Hide my IP from peers"** (Settings, off by default) — WebRTC has to tell the other
+  side where to send packets, so by default your address list is handed to every peer in
+  the room as ordinary text. This sets `iceTransportPolicy: 'relay'`, which makes the
+  browser skip host and server-reflexive gathering entirely and only allocate on the TURN
+  server, so peers receive the relay's address where yours used to be. The trade is
+  stated plainly in the UI: everything routes through a free public relay, so it is
+  slower, and there is **no direct-path fallback** — if that relay is unreachable the
+  connection fails outright. It does **not** hide you from the Nostr relays or the TURN
+  operator, because you connect straight to those; only Tor or a VPN covers that.
 - Built for keyboards & screen readers: focus rings, focus-trapped mobile drawers,
   keyboard-navigable emoji grid, live regions, skip link, and forced-colors support.
   Popovers keep `aria-expanded` honest and hand focus back to their button on Escape.

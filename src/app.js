@@ -134,7 +134,7 @@ const scrim = $('#scrim'), meName = $('#me-name'), meDot = $('#me-dot')
 const roomChip = $('#room-chip'), roomChipName = $('#room-chip-name')
 const roomsBtn = $('#rooms-btn'), roomsPanel = $('#rooms'), roomCurrentEl = $('#room-current'), roomsCopyLink = $('#rooms-copy-link'), roomsCopyName = $('#rooms-copy-name'), roomNameInput = $('#room-name'), roomPassInput = $('#room-pass'), roomErrEl = $('#room-err'), roomGoBtn = $('#room-go'), roomPublicBtn = $('#room-public')
 const themeBtn = $('#theme-btn'), blurBtn = $('#blur-btn'), liveRegion = $('#live'), liveSys = $('#live-sys')
-const soundBtn = $('#sound-btn'), notifyBtn = $('#notify-btn')
+const soundBtn = $('#sound-btn'), notifyBtn = $('#notify-btn'), relayBtn = $('#relay-btn')
 const lightbox = $('#lightbox'), lightboxImg = $('#lightbox-img'), lightboxDl = $('#lightbox-dl'), lightboxName = $('#lightbox-name'), lightboxClose = $('#lightbox-close')
 const emptyEl = $('#empty'), emptyH = $('#empty-h'), emptyP = $('#empty-p'), emptyBtn = $('#empty-btn')
 const renameModal = $('#rename'), renameForm = $('#rename-form'), renameMsg = $('#rename-msg'), renameInput = $('#rename-input'), renameErr = $('#rename-err')
@@ -1206,6 +1206,9 @@ async function startChat() {
     if (!window.crypto || !crypto.subtle) throw new Error('WebCrypto unavailable')
     const cfg = {appId: CONFIG.appId, relayConfig: {urls: CONFIG.relayUrls, redundancy: CONFIG.relayRedundancy}}
     if (CONFIG.turnConfig.length) cfg.turnConfig = CONFIG.turnConfig
+    // rtcConfig is spread straight into the RTCPeerConnection by Trystero, so
+    // this is what actually keeps your address out of the candidate exchange
+    if (relayOnly && CONFIG.turnConfig.length) cfg.rtcConfig = {iceTransportPolicy: 'relay'}
     if (myPass) cfg.password = await stretchPass(myPass)
     room = joinRoom(cfg, CONFIG.roomId)
     wireRoom(room)
@@ -1624,7 +1627,10 @@ function updateStatusLoop() {
       if (!noPeerSince) noPeerSince = Date.now()
       const stuck = Date.now() - noPeerSince > 12000
       statusDot.className = 'dot dot--wait'
-      setStatus(stuck ? 'Relays up, no peers — strict NAT?' : 'Waiting for people…')
+      // in relay-only mode there is no direct-path fallback, so a busy public
+      // TURN is the likeliest reason nothing connects — say so instead of
+      // blaming the network
+      setStatus(stuck ? (relayOnly ? 'No peers — IP-hiding relay may be busy' : 'Relays up, no peers — strict NAT?') : 'Waiting for people…')
     } else { statusDot.className = 'dot dot--off'; setStatus(navigator.onLine === false ? 'Offline' : 'Connecting…') }
     if (online > 0) noPeerSince = 0
     prevRelays = relays
@@ -1895,6 +1901,45 @@ async function toggleNotify() {
   applyNotify()
 }
 
+/* ----- relay-only mode: keep your IP out of the peer handshake ---- *
+ * WebRTC has to tell the other side where to send packets, so by default your
+ * address list ("ICE candidates") includes your public IP and it is handed to
+ * every peer in the room as ordinary text. With iceTransportPolicy:'relay' the
+ * browser skips host and server-reflexive gathering altogether and only
+ * allocates on the TURN server, so the list peers receive carries the relay's
+ * address where yours used to be.
+ *
+ * The trade is real and it is not a secret: every byte then goes through a free
+ * public TURN service, which is slower, and there is no direct-path fallback —
+ * if that relay is unreachable the connection simply fails. It also does
+ * nothing about the Nostr relays or the TURN operator themselves seeing your
+ * IP, because you connect straight to those. Only Tor or a VPN covers that.
+ * ------------------------------------------------------------------ */
+let relayOnly = false
+try { relayOnly = localStorage.getItem('c2c-relayonly') === '1' } catch {}
+function applyRelayOnly() {
+  relayBtn.setAttribute('aria-pressed', String(relayOnly))
+  relayBtn.classList.toggle('on', relayOnly)
+  relayBtn.title = relayOnly
+    ? 'On — peers see the relay’s address instead of yours (slower; fails if the relay is unreachable)'
+    : 'Off — peers can see your IP address'
+}
+function toggleRelayOnly() {
+  if (!relayOnly && !CONFIG.turnConfig.length) {   // no TURN = relay-only can never connect
+    addSystem('Can’t hide your IP: no relay server is configured for this deployment.')
+    return
+  }
+  relayOnly = !relayOnly
+  try { localStorage.setItem('c2c-relayonly', relayOnly ? '1' : '0') } catch {}
+  applyRelayOnly()
+  addSystem(relayOnly
+    ? '🛡️ Hiding your IP from peers — reconnecting through a relay. Expect it to be slower, and it can fail if the public relay is busy.'
+    : 'No longer hiding your IP — reconnecting with direct connections.')
+  // the policy is fixed per RTCPeerConnection, so existing links keep the old
+  // behaviour until they are torn down and re-made
+  if (entered) reconnect()
+}
+
 let safeView = false
 try { safeView = localStorage.getItem('c2c-safe') === '1' } catch {}
 function applyBlur() {
@@ -2050,6 +2095,7 @@ themeBtn.addEventListener('click', cycleTheme)
 blurBtn.addEventListener('click', toggleBlur)
 soundBtn.addEventListener('click', toggleSound)
 notifyBtn.addEventListener('click', toggleNotify)
+relayBtn.addEventListener('click', toggleRelayOnly)
 lightboxClose.addEventListener('click', closeLightbox)
 lightbox.addEventListener('click', e => { if (e.target === lightbox) closeLightbox() })
 
@@ -2153,7 +2199,7 @@ async function joinWithNameCheck() {
  * Boot
  * ------------------------------------------------------------------ */
 function boot() {
-  applyTheme(); applyBlur(); applySound(); applyNotify(); initViewportFit()
+  applyTheme(); applyBlur(); applySound(); applyNotify(); applyRelayOnly(); initViewportFit()
   nickInput.maxLength = CONFIG.maxNameLen
   inputEl.maxLength = CONFIG.maxMsgLen
   // the keyboard hint only fits on wide screens. Driven by the media query, not
