@@ -270,6 +270,43 @@ last person leaves. No server, no database.
   messages went from **4.8 ms to 2.6 ms each** and first paint from **870 ms to
   640 ms**.
 
+### Staying connected
+
+Three different things strand a peer-to-peer session, and only one of them
+announces itself:
+
+1. **The device loses the network** — `online`/`offline` fires, which is the easy
+   case.
+2. **The device *switches* network** (wi-fi ↔ cellular) — **nothing fires at all.**
+   `navigator.onLine` stays `true` the whole time, because there is still a
+   network; it just has a different address, and every relay socket and peer
+   connection is now dead. This is the case people actually hit — walking out of
+   the house with the app open. Handled by listening to `navigator.connection`'s
+   `change` event, the one signal this transition does produce.
+3. **Sockets die quietly** — sleep, NAT timeout, a relay restart, packets being
+   blackholed by a captive portal. No event of any kind.
+
+So the app doesn't trust events alone. A watchdog judges the connection by how
+long it has been since the last genuinely healthy signal (an open relay socket or
+a live peer) and rejoins with exponential backoff, capped, resetting the moment a
+peer connects. Sockets still handshaking earn a longer grace than a set that has
+gone fully closed, so a slow network isn't torn down mid-connect.
+
+Two details that matter more than they look:
+
+- The watchdog runs **even when the tab is hidden**. It used to return early on
+  `document.hidden`, which on a phone is most of the time — so a session that
+  died in the background stayed dead.
+- `pagehide` fires both for a real unload **and** when the page enters the
+  back/forward cache, which on mobile is every time you switch apps. Leaving the
+  room there meant backgrounding the browser quietly dropped you out of the chat.
+  It now only leaves on a genuine unload, and rejoins on `pageshow`.
+
+What none of this fixes is throughput. Speed over a direct peer connection is
+whatever the two networks give you; when NAT forces traffic through TURN it is
+whatever the free public relay gives you, which is not much. A dedicated TURN
+server is the only real answer there — see **Connectivity** above.
+
 ## Limitations (honest ones)
 
 - History is **session-only**: a newcomer only sees history if *someone* is still in

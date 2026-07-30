@@ -5,7 +5,7 @@
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-IgWHLpPy7bYjqUlCPpBf4WtZFza/9rijG0ZmNfjUcVE=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-rdHY1ZBiLZBSxk8ywRVblrofK7QjAhqQyrS9R9tclPY=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
   <!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the LAYOUT
        viewport too, so the app keeps fitting and the header can't be scrolled away
        (Android/Chrome). iOS ignores it — app.js measures visualViewport there. -->
@@ -1915,7 +1915,15 @@ async function startChat() {
     room = joinRoom(cfg, CONFIG.roomId)
     wireRoom(room)
     updateStatusLoop()
-  } catch (err) { showFatal(err) }
+  } catch (err) {
+    // A missing WebCrypto is permanent — retrying can't help. Anything else is
+    // likely transient (relay hiccup mid-rejoin), so keep trying with backoff
+    // rather than stranding an already-joined session on an error line.
+    if (entered && window.isSecureContext && window.crypto && crypto.subtle) {
+      statusDot.className = 'dot dot--off'
+      scheduleReconnect('the last attempt failed')
+    } else showFatal(err)
+  }
 }
 function showFatal(err) {
   statusDot.className = 'dot dot--off'
@@ -1927,14 +1935,17 @@ function showFatal(err) {
 
 // Manual reconnect: leave the room, reset peer/connection state (keep the chat
 // timeline), and re-join. Used by the status panel's Reconnect button.
-function reconnect() {
+function reconnect(why) {
+  clearTimeout(reconnectTimer); reconnectTimer = null
   try { if (room) room.leave() } catch {}
   room = null; actions = null
   for (const t of typingTimers.values()) clearTimeout(t)
   typingTimers.clear(); peers.clear(); histAcceptedFrom.clear(); floodState.clear()
   cancelAttestation()   // keep the DAG (timeline survives a reconnect), drop the pending vote
-  prevRelays = 0; noPeerSince = 0
-  renderRoster(); renderTyping(); addSystem('Reconnecting…')
+  prevRelays = 0; noPeerSince = 0; lastHealthy = Date.now()
+  renderRoster(); renderTyping()
+  // an automatic retry says why, so a reconnect nobody asked for isn't mysterious
+  addSystem(why ? `Reconnecting — ${why}…` : 'Reconnecting…')
   startChat()
 }
 
@@ -1951,6 +1962,7 @@ function leaveAndReset() {
   entryById.clear(); nodeCache.clear(); unreadMarkerId = null
   cancelAttestation(); resetDag()
   clearTimeout(pendingSysTimer); pendingSysTimer = null; pendingSys = []
+  clearTimeout(reconnectTimer); reconnectTimer = null; reconnectTries = 0; lastHealthy = Date.now()
   hideJump(); setUnread(0); keepAtBottom = true
   prevRelays = 0; noPeerSince = 0
 }
@@ -2070,6 +2082,7 @@ function wireRoom(room) {
   file.onReceiveProgress = (pct, {peerId, metadata}) => onFileProgress(pct, peerId, metadata)
 
   room.onPeerJoin = peerId => {
+    connectionRecovered()   // a live peer proves the path works — reset the backoff
     if (!peers.has(peerId)) peers.set(peerId, {name: null, presence: 'active'})
     name.send(myName, {target: peerId})
     presence.send(myPresence, {target: peerId})
@@ -2314,17 +2327,47 @@ function updateCounter() {
  * Connection status + relay/ping panel
  * ------------------------------------------------------------------ */
 let prevRelays = 0, noPeerSince = 0, statusTimer = null, statusTick = null
+// `pending` = still handshaking (readyState 0). The watchdog must not count a
+// socket that is mid-connect as dead, or a slow network would have the session
+// torn down and restarted right as it was about to come up.
 function relayStates() {
-  try { return Object.entries(getRelaySockets() || {}).map(([url, s]) => ({url, open: s && s.readyState === 1})) } catch { return [] }
+  try { return Object.entries(getRelaySockets() || {}).map(([url, s]) => ({url, open: s && s.readyState === 1, pending: s && s.readyState === 0})) } catch { return [] }
+}
+// Judge the connection by whether the signalling sockets are actually open. No
+// relay socket means no discovery and no way back — a dead session that used to
+// sit there looking like it was merely "Connecting…".
+/* Measure time since the last genuinely healthy signal — an open relay socket or
+ * a live peer — rather than trying to interpret each socket's state.
+ *
+ * The obvious version (treat a mid-handshake socket as alive) does not survive
+ * contact with Trystero: it recreates failed sockets continuously, so a URL
+ * cycles CONNECTING → CLOSED → CONNECTING several times a second. Any per-socket
+ * grace period gets reset by that churn, and a relay set that is failing 100% of
+ * the time still looks like it is "about to connect" forever.
+ *
+ * Time-since-healthy has no such hole: retry churn never touches it, only a
+ * working connection does. Sockets still trying earn a longer window than a set
+ * that has gone fully closed, so a slow network is not torn down mid-handshake. */
+const DEAD_TRYING = 16000, DEAD_CLOSED = 6000
+let lastHealthy = Date.now()
+function checkHealth(open, online, trying) {
+  if (!entered || reconnectTimer) return
+  if (open > 0 || online > 0) { lastHealthy = Date.now(); connectionRecovered(); return }
+  if (Date.now() - lastHealthy < (trying ? DEAD_TRYING : DEAD_CLOSED)) return
+  scheduleReconnect('the connection dropped')
 }
 function updateStatusLoop() {
   const tick = () => {
-    if (document.hidden) return   // no polling work while the tab is in the background
     const states = relayStates()
     const relays = states.filter(s => s.open).length
     const online = peers.size
+    // health first, and unconditionally: this used to return early whenever the
+    // tab was hidden, which on a phone is most of the time — so a session that
+    // died in the background stayed dead
+    checkHealth(relays, online, states.some(s => s.pending))
+    prevRelays = relays
+    if (document.hidden) return   // ...but skip the DOM work while nobody can see it
     if (online > 0) { statusDot.className = 'dot dot--on'; setStatus(`${online + 1} online`) }
-    else if (relays > 0 && prevRelays > 0 && relays < prevRelays && noPeerSince) { statusDot.className = 'dot dot--wait'; setStatus('Reconnecting…') }
     else if (relays > 0) {
       if (!noPeerSince) noPeerSince = Date.now()
       const stuck = Date.now() - noPeerSince > 12000
@@ -2333,9 +2376,11 @@ function updateStatusLoop() {
       // TURN is the likeliest reason nothing connects — say so instead of
       // blaming the network
       setStatus(stuck ? (relayOnly ? 'No peers — IP-hiding relay may be busy' : 'Relays up, no peers — strict NAT?') : 'Waiting for people…')
-    } else { statusDot.className = 'dot dot--off'; setStatus(navigator.onLine === false ? 'Offline' : 'Connecting…') }
+    } else {
+      statusDot.className = 'dot dot--off'
+      setStatus(navigator.onLine === false ? 'Offline' : reconnectTries ? 'Reconnecting…' : 'Connecting…')
+    }
     if (online > 0) noPeerSince = 0
-    prevRelays = relays
   }
   statusTick = tick
   tick()
@@ -2378,7 +2423,9 @@ function openStatusPanel() {
   }
   const rc = document.createElement('button')
   rc.type = 'button'; rc.className = 'share-b'; rc.textContent = '↻ Reconnect'; rc.style.marginTop = '10px'; rc.style.width = '100%'
-  rc.addEventListener('click', () => { setPop(statusPanel, statusBtn, false); reconnect() })
+  // a manual retry means "try now" — clear any pending backoff instead of
+  // queueing behind it
+  rc.addEventListener('click', () => { setPop(statusPanel, statusBtn, false); connectionRecovered(); reconnect() })
   statusPanel.appendChild(rc)
   setPop(statusPanel, statusBtn, true)
 }
@@ -2818,21 +2865,68 @@ document.addEventListener('keydown', e => {
 })
 ;['mousemove', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, () => { if (myPresence === 'idle') bumpActivity() }, {passive: true}))
 
+/* ----- page lifecycle -----
+ * `pagehide` fires for a real unload AND when the page goes into the back/forward
+ * cache — which on mobile is what happens every time you switch apps. Leaving the
+ * room there meant backgrounding the browser silently dropped you out of the chat,
+ * and coming back restored a dead page that never re-joined. Only leave when the
+ * page is actually going away (`persisted === false`), and re-join on restore. */
 const leaveRoom = () => { try { if (room) room.leave() } catch {} }
-window.addEventListener('pagehide', leaveRoom)
+window.addEventListener('pagehide', e => { if (!e.persisted) leaveRoom() })
 window.addEventListener('beforeunload', leaveRoom)
-// A real network drop kills the relay sockets and every data channel, and
-// nothing brings them back on its own — so coming back online re-joins the room
-// instead of only relabelling the status pill.
-let wasOffline = false
-window.addEventListener('offline', () => { wasOffline = true; statusDot.className = 'dot dot--off'; setStatus('Offline') })
-window.addEventListener('online', () => {
-  if (!wasOffline) return
-  wasOffline = false
+window.addEventListener('pageshow', e => {
+  if (!e.persisted || !entered) return
   setStatus('Reconnecting…')
-  if (!entered) return
-  setTimeout(() => { if (entered && navigator.onLine !== false) reconnect() }, 800)
+  scheduleReconnect('returning to the page', 0)
 })
+/* ------------------------------------------------------------------ *
+ * Staying connected
+ *
+ * Three separate things can strand a session, and only one of them is a
+ * clean "offline" event:
+ *
+ *  1. The device really loses the network      → online/offline fires.
+ *  2. It SWITCHES network (wifi ↔ cellular)    → nothing fires at all.
+ *     navigator.onLine stays true the whole time because there is still a
+ *     network — just a different one, with a different address. Every relay
+ *     socket and every peer connection is dead, and the old code sat there
+ *     waiting for an "online" event that was never coming. This is the case
+ *     people actually hit, walking out of the house with the app open.
+ *  3. Sockets die quietly (sleep, NAT timeout, relay restart) → no event.
+ *
+ * So: treat online/offline as a hint, take navigator.connection's change
+ * event as the fast signal for a switch, and back both with a watchdog that
+ * judges the connection by whether the relay sockets are actually open.
+ * ------------------------------------------------------------------ */
+let reconnectTimer = null, reconnectTries = 0
+function scheduleReconnect(why, delay) {
+  if (!entered || reconnectTimer) return
+  reconnectTries++
+  // back off so a genuinely dead network doesn't become a rejoin loop
+  const wait = delay ?? Math.min(20000, 1000 * 2 ** (reconnectTries - 1))
+  statusDot.className = 'dot dot--wait'
+  setStatus('Reconnecting…')
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    if (!entered) return
+    reconnect(why)
+  }, wait)
+}
+function connectionRecovered() { reconnectTries = 0 }
+
+window.addEventListener('offline', () => { statusDot.className = 'dot dot--off'; setStatus('Offline') })
+window.addEventListener('online', () => { if (entered) scheduleReconnect('the network came back', 600) })
+
+// Network Information API: fires when the device moves between wifi and
+// cellular, which is the one transition that produces no online/offline pair.
+const netInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+if (netInfo && netInfo.addEventListener) {
+  netInfo.addEventListener('change', () => {
+    if (!entered) return
+    reconnectTries = 0          // a deliberate network change deserves a prompt retry
+    scheduleReconnect('the network changed', 600)
+  })
+}
 // Surface script errors in the chat, but cap it: a fault inside the render path
 // would otherwise have each report trigger another render and flood the room.
 let errShown = 0
