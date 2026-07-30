@@ -238,6 +238,9 @@ button { font-family: inherit; color: inherit; }
 .set-btn:hover { border-color: var(--accent); box-shadow: var(--glow); }
 .set-btn:active { transform: scale(.96); }
 .set-btn[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel)); box-shadow: inset 0 0 14px rgba(54,214,255,.12); }
+.set-btn--wide { flex: 1 1 100%; }
+.settings-note { margin: 8px 2px 12px; font-size: 11.5px; line-height: 1.5; color: var(--txt-faint); }
+.settings-note strong { color: var(--txt-dim); }
 
 /* people */
 .people-list { list-style: none; margin: 0; padding: 6px 10px 16px; display: flex; flex-direction: column; gap: 4px; }
