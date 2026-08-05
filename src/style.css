@@ -41,6 +41,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Every interactive element has its own :active feedback, so the browser's grey
+   tap flash only adds a second, laggier-looking response on touch. */
+button, a, .react, .replyquote { -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
 body {
   margin: 0; font-family: var(--font); color: var(--txt); background: var(--bg);
@@ -287,13 +290,20 @@ button { font-family: inherit; color: inherit; }
 .empty > :nth-child(3) { animation-delay: .1s; }
 .empty > :nth-child(4) { animation-delay: .15s; }
 
-/* content-visibility lets the engine skip style/layout/paint for rows scrolled
-   out of view (the intrinsic size keeps the scrollbar honest). padding-top
-   carries the hover toolbar INSIDE the row box, since content-visibility also
-   applies paint containment and would otherwise clip a negative offset. */
-/* touch-action: pan-y keeps vertical scrolling native while letting a
-   horizontal drag become the swipe-to-reply gesture */
-.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; content-visibility: auto; contain-intrinsic-size: auto 64px; touch-action: pan-y; }
+/* This row used to carry `content-visibility: auto`. Measured on a 250-message
+   room at 6x CPU throttle, it cost 4.8s of blocked main thread across one
+   ordinary scroll through the list — every row entering the viewport needs
+   style and layout computed right then, and variable-height messages keep the
+   scroll height being corrected — to save ~740ms spread across 250 inserts.
+   It is meant for unbounded documents; this list is hard-capped at
+   CONFIG.maxRendered (400) rows, so there was nothing for it to save and a
+   frame budget to lose. Removing it took contiguous-scroll blocking to zero.
+
+   padding-top carries the hover toolbar INSIDE the row box rather than at a
+   negative offset, which is also what keeps it clear of the row above.
+   touch-action: pan-y keeps vertical scrolling native while letting a
+   horizontal drag become the swipe-to-reply gesture. */
+.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; touch-action: pan-y; }
 .msg.swipe-back { transition: transform .18s ease; }
 .msg.swipe-armed .bubble { box-shadow: -3px 0 0 0 var(--accent), 0 4px 18px rgba(92,100,255,.35); }
 /* grouped rows keep their tight 2px gap, but still reserve the 10px of padding

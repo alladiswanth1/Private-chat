@@ -256,19 +256,37 @@ last person leaves. No server, no database.
   limits, and reply/reaction/history that never trust claimed identity.
 - **Built to stay fast in a busy room:** message rows are built once and reused, so a
   mute toggle or a history hand-off reorders existing nodes instead of rebuilding
-  thousands of elements; off-screen rows are skipped by the engine
-  (`content-visibility`); duplicate-name detection is a set lookup rather than a scan
+  thousands of elements; duplicate-name detection is a set lookup rather than a scan
   per message; file-transfer progress writes to a retained node instead of querying
   the DOM hundreds of times; and sticking to the newest message is coalesced into one
   scroll write per frame, so a burst of ten messages costs one layout instead of ten.
   Scroll handling is rAF-coalesced too (a flicked list fires dozens of events per
   frame, each of which used to force a layout), join/leave lines append instead of
-  rebuilding the list, and the mobile-vs-desktop breakpoint is read from a single
-  `MediaQueryList` rather than allocating one per touch.
-  Measured on a 400-message room: a full re-render went from **~63 ms of blocked main
-  thread to ~7 ms**, and on a 6×-throttled CPU (mid-range phone proxy) incoming
-  messages went from **4.8 ms to 2.6 ms each** and first paint from **870 ms to
-  640 ms**.
+  rebuilding the list, roster rebuilds and textarea auto-grow are batched to one per
+  frame, the typing indicator skips redundant rebuilds, and the mobile-vs-desktop
+  breakpoint is read from a single `MediaQueryList` rather than allocating one per
+  touch.
+
+  Two of these were measured rather than assumed, on a 250-message room at 6× CPU
+  throttle (mid-range phone proxy), medians of three runs:
+
+  | | before | after |
+  |---|---|---|
+  | 60 keystrokes (input latency) | 217 ms | 18 ms |
+  | one scroll through the list | 5262 ms blocked | 109 ms blocked |
+
+  The scroll figure is why `content-visibility: auto` is **not** used on message
+  rows. It is built for unbounded documents, and this list is hard-capped at
+  `maxRendered` (400) rows — so it had nothing to save, while every row entering
+  the viewport still needed style and layout computed on the spot, and
+  variable-height messages kept the scroll height being corrected. A/B'd three
+  times each way: it cost ~5 s of blocked main thread per scroll for **no
+  measurable insert saving** (2115 ms vs 2130 ms). Worth re-checking if the render
+  cap ever grows by an order of magnitude.
+
+  Also measured and rejected: dropping `backdrop-filter` from the composer, and
+  disabling the aurora background animation. Neither changed scroll blocking at
+  all, so both stayed.
 
 ### Staying connected
 
