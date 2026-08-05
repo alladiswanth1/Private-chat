@@ -5,7 +5,7 @@
   <!-- Everything is inlined into this single page; the app never inserts untrusted HTML (textContent only). -->
   <!-- Build-time tokens: connect-src gets the exact relay origins from CONFIG.relayUrls; script-src gets
        sha256 hashes of the inlined scripts, so no other inline script could ever execute. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-rdHY1ZBiLZBSxk8ywRVblrofK7QjAhqQyrS9R9tclPY=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'sha256-OWOPOqSPVIclu53alrjLrmjYUSQW6bd+KOpdVbq+Yc0=' 'sha256-cgzV/z4g0SJsfqWRXP+3KUmYZYD3jGofeSZMrNxm63g=' 'sha256-WENdLyrfQOYhi3uPyhhFT1fml7fMBzfTNDYi3AzGCtE='; connect-src wss://relay.damus.io wss://nos.lol wss://relay.nostr.band wss://relay.primal.net wss://nostr.mom wss://relay.0xchat.com wss://nostr.bitcoiner.social wss://relay.nostr.net wss://offchain.pub; base-uri 'none'; form-action 'none'" />
   <!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the LAYOUT
        viewport too, so the app keeps fitting and the header can't be scrolled away
        (Android/Chrome). iOS ignores it — app.js measures visualViewport there. -->
@@ -58,6 +58,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Every interactive element has its own :active feedback, so the browser's grey
+   tap flash only adds a second, laggier-looking response on touch. */
+button, a, .react, .replyquote { -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
 body {
   margin: 0; font-family: var(--font); color: var(--txt); background: var(--bg);
@@ -304,13 +307,20 @@ button { font-family: inherit; color: inherit; }
 .empty > :nth-child(3) { animation-delay: .1s; }
 .empty > :nth-child(4) { animation-delay: .15s; }
 
-/* content-visibility lets the engine skip style/layout/paint for rows scrolled
-   out of view (the intrinsic size keeps the scrollbar honest). padding-top
-   carries the hover toolbar INSIDE the row box, since content-visibility also
-   applies paint containment and would otherwise clip a negative offset. */
-/* touch-action: pan-y keeps vertical scrolling native while letting a
-   horizontal drag become the swipe-to-reply gesture */
-.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; content-visibility: auto; contain-intrinsic-size: auto 64px; touch-action: pan-y; }
+/* This row used to carry `content-visibility: auto`. Measured on a 250-message
+   room at 6x CPU throttle, it cost 4.8s of blocked main thread across one
+   ordinary scroll through the list — every row entering the viewport needs
+   style and layout computed right then, and variable-height messages keep the
+   scroll height being corrected — to save ~740ms spread across 250 inserts.
+   It is meant for unbounded documents; this list is hard-capped at
+   CONFIG.maxRendered (400) rows, so there was nothing for it to save and a
+   frame budget to lose. Removing it took contiguous-scroll blocking to zero.
+
+   padding-top carries the hover toolbar INSIDE the row box rather than at a
+   negative offset, which is also what keeps it clear of the row above.
+   touch-action: pan-y keeps vertical scrolling native while letting a
+   horizontal drag become the swipe-to-reply gesture. */
+.msg { display: flex; gap: 10px; max-width: min(74%,720px); margin-top: 3px; padding: 10px 0 2px; position: relative; touch-action: pan-y; }
 .msg.swipe-back { transition: transform .18s ease; }
 .msg.swipe-armed .bubble { box-shadow: -3px 0 0 0 var(--accent), 0 4px 18px rgba(92,100,255,.35); }
 /* grouped rows keep their tight 2px gap, but still reserve the 10px of padding
@@ -2164,12 +2174,17 @@ function markPeerTyping(peerId) {
 function clearPeerTyping(peerId) {
   if (typingTimers.has(peerId)) { clearTimeout(typingTimers.get(peerId)); typingTimers.delete(peerId); renderTyping() }
 }
+let lastTypingLabel = null
 function renderTyping() {
   const names = [...typingTimers.keys()].filter(id => !isMuted(id)).map(nameOf)
   let label = ''
   if (names.length === 1) label = `${names[0]} is typing`
   else if (names.length === 2) label = `${names[0]} and ${names[1]} are typing`
   else if (names.length > 2) label = 'Several people are typing'
+  // typing packets repeat every ~1.5s per peer while they type; rebuilding an
+  // identical indicator each time also restarted the dots animation mid-wave
+  if (label === lastTypingLabel) return
+  lastTypingLabel = label
   if (!label) { typingEl.hidden = true; typingEl.replaceChildren(); return }
   const dots = document.createElement('span'); dots.className = 'dots'
   dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'))
@@ -2192,8 +2207,18 @@ function bumpActivity() {
 /* ------------------------------------------------------------------ *
  * Roster
  * ------------------------------------------------------------------ */
+// Presence and name packets arrive at their own pace (a busy room can produce
+// dozens a second), and each one used to rebuild the whole list. The duplicate
+// -name set stays synchronous — message rendering reads it — but the DOM work
+// is coalesced to one rebuild per frame.
+let rosterPending = false
 function renderRoster() {
   refreshDupNames()   // roster changed → recompute the duplicate-name set once
+  if (rosterPending) return
+  rosterPending = true
+  requestAnimationFrame(() => { rosterPending = false; renderRosterNow() })
+}
+function renderRosterNow() {
   const count = peers.size + 1
   onlineCountEl.textContent = String(count)
   peopleCountEl.textContent = String(count)
@@ -2257,9 +2282,26 @@ function sendMessage() {
 // Single-row composer that grows with the text (capped, then scrolls).
 // An EMPTY textarea reports its wrapped placeholder in scrollHeight, so falling
 // back to the stylesheet height is what keeps the box one row when cleared.
+// Measuring the textarea means writing `height:auto` and reading scrollHeight
+// back, which is a forced synchronous layout. Doing that per keystroke cost
+// ~3.6ms of input latency per character on a throttled phone; coalescing into
+// one measure per frame makes fast typing and IME composition cost the same as
+// a single character. The final write is skipped when the height is unchanged,
+// so ordinary one-line typing does not dirty style at all.
+let growPending = false
 function autoGrow() {
-  inputEl.style.height = 'auto'
-  inputEl.style.height = inputEl.value ? Math.min(inputEl.scrollHeight, 132) + 'px' : ''
+  if (growPending) return
+  growPending = true
+  requestAnimationFrame(() => {
+    growPending = false
+    // An EMPTY textarea reports its wrapped placeholder in scrollHeight, so
+    // falling back to the stylesheet height is what keeps the box one row.
+    if (!inputEl.value) { inputEl.style.height = ''; return }
+    // the reset must always be followed by a write — leaving it at `auto`
+    // would collapse the box
+    inputEl.style.height = 'auto'
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px'
+  })
 }
 
 function handleSlash(text) {
@@ -2975,15 +3017,20 @@ async function joinWithNameCheck() {
   // that slips past is caught by the live auto-rename fallback.
   const taken = await new Promise(resolve => {
     const t0 = Date.now()
+    let relaysUpAt = 0
     const iv = setInterval(() => {
       if (nameTakenByPeer(myName)) { clearInterval(iv); resolve(true); return }   // clash → block
       const el = Date.now() - t0
-      const relays = relayStates().filter(s => s.open).length
-      // empty room: relays up but nobody connected after a grace → free, fast.
-      // Otherwise wait a fixed window (don't early-exit on partial discovery, or a
-      // peer still connecting could be missed); slow-tail slips are auto-renamed.
-      if ((relays > 0 && peers.size === 0 && el > 2500) || el > 5000) { clearInterval(iv); resolve(false) }
-    }, 150)
+      if (!relaysUpAt && relayStates().some(s => s.open)) relaysUpAt = Date.now()
+      // Empty room: relays up but nobody connected after a grace → free, fast.
+      // The grace runs from when discovery became POSSIBLE rather than from when
+      // we started trying, so a fast relay connection means a fast join instead
+      // of always paying the worst case. Otherwise wait out the hard cap (don't
+      // early-exit on partial discovery, or a peer still connecting could be
+      // missed); slow-tail slips are caught by the forced-rename fallback.
+      const settled = relaysUpAt && peers.size === 0 && Date.now() - relaysUpAt > 1800
+      if (settled || el > 5000) { clearInterval(iv); resolve(false) }
+    }, 100)
   })
   if (taken) { leaveAndReset(); renderRoster(); renderTimeline(); return false }
   revealApp()

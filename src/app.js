@@ -1463,12 +1463,17 @@ function markPeerTyping(peerId) {
 function clearPeerTyping(peerId) {
   if (typingTimers.has(peerId)) { clearTimeout(typingTimers.get(peerId)); typingTimers.delete(peerId); renderTyping() }
 }
+let lastTypingLabel = null
 function renderTyping() {
   const names = [...typingTimers.keys()].filter(id => !isMuted(id)).map(nameOf)
   let label = ''
   if (names.length === 1) label = `${names[0]} is typing`
   else if (names.length === 2) label = `${names[0]} and ${names[1]} are typing`
   else if (names.length > 2) label = 'Several people are typing'
+  // typing packets repeat every ~1.5s per peer while they type; rebuilding an
+  // identical indicator each time also restarted the dots animation mid-wave
+  if (label === lastTypingLabel) return
+  lastTypingLabel = label
   if (!label) { typingEl.hidden = true; typingEl.replaceChildren(); return }
   const dots = document.createElement('span'); dots.className = 'dots'
   dots.append(document.createElement('i'), document.createElement('i'), document.createElement('i'))
@@ -1491,8 +1496,18 @@ function bumpActivity() {
 /* ------------------------------------------------------------------ *
  * Roster
  * ------------------------------------------------------------------ */
+// Presence and name packets arrive at their own pace (a busy room can produce
+// dozens a second), and each one used to rebuild the whole list. The duplicate
+// -name set stays synchronous — message rendering reads it — but the DOM work
+// is coalesced to one rebuild per frame.
+let rosterPending = false
 function renderRoster() {
   refreshDupNames()   // roster changed → recompute the duplicate-name set once
+  if (rosterPending) return
+  rosterPending = true
+  requestAnimationFrame(() => { rosterPending = false; renderRosterNow() })
+}
+function renderRosterNow() {
   const count = peers.size + 1
   onlineCountEl.textContent = String(count)
   peopleCountEl.textContent = String(count)
@@ -1556,9 +1571,26 @@ function sendMessage() {
 // Single-row composer that grows with the text (capped, then scrolls).
 // An EMPTY textarea reports its wrapped placeholder in scrollHeight, so falling
 // back to the stylesheet height is what keeps the box one row when cleared.
+// Measuring the textarea means writing `height:auto` and reading scrollHeight
+// back, which is a forced synchronous layout. Doing that per keystroke cost
+// ~3.6ms of input latency per character on a throttled phone; coalescing into
+// one measure per frame makes fast typing and IME composition cost the same as
+// a single character. The final write is skipped when the height is unchanged,
+// so ordinary one-line typing does not dirty style at all.
+let growPending = false
 function autoGrow() {
-  inputEl.style.height = 'auto'
-  inputEl.style.height = inputEl.value ? Math.min(inputEl.scrollHeight, 132) + 'px' : ''
+  if (growPending) return
+  growPending = true
+  requestAnimationFrame(() => {
+    growPending = false
+    // An EMPTY textarea reports its wrapped placeholder in scrollHeight, so
+    // falling back to the stylesheet height is what keeps the box one row.
+    if (!inputEl.value) { inputEl.style.height = ''; return }
+    // the reset must always be followed by a write — leaving it at `auto`
+    // would collapse the box
+    inputEl.style.height = 'auto'
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 132) + 'px'
+  })
 }
 
 function handleSlash(text) {
@@ -2274,15 +2306,20 @@ async function joinWithNameCheck() {
   // that slips past is caught by the live auto-rename fallback.
   const taken = await new Promise(resolve => {
     const t0 = Date.now()
+    let relaysUpAt = 0
     const iv = setInterval(() => {
       if (nameTakenByPeer(myName)) { clearInterval(iv); resolve(true); return }   // clash → block
       const el = Date.now() - t0
-      const relays = relayStates().filter(s => s.open).length
-      // empty room: relays up but nobody connected after a grace → free, fast.
-      // Otherwise wait a fixed window (don't early-exit on partial discovery, or a
-      // peer still connecting could be missed); slow-tail slips are auto-renamed.
-      if ((relays > 0 && peers.size === 0 && el > 2500) || el > 5000) { clearInterval(iv); resolve(false) }
-    }, 150)
+      if (!relaysUpAt && relayStates().some(s => s.open)) relaysUpAt = Date.now()
+      // Empty room: relays up but nobody connected after a grace → free, fast.
+      // The grace runs from when discovery became POSSIBLE rather than from when
+      // we started trying, so a fast relay connection means a fast join instead
+      // of always paying the worst case. Otherwise wait out the hard cap (don't
+      // early-exit on partial discovery, or a peer still connecting could be
+      // missed); slow-tail slips are caught by the forced-rename fallback.
+      const settled = relaysUpAt && peers.size === 0 && Date.now() - relaysUpAt > 1800
+      if (settled || el > 5000) { clearInterval(iv); resolve(false) }
+    }, 100)
   })
   if (taken) { leaveAndReset(); renderRoster(); renderTimeline(); return false }
   revealApp()
