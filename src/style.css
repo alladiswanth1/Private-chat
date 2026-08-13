@@ -398,9 +398,15 @@ button { font-family: inherit; color: inherit; }
 .reactmenu button:hover { background: var(--panel-3); transform: scale(1.22); }
 .reactmenu button:active { transform: scale(.94); }
 
-/* safe view (blur incoming until hover/focus) */
+/* Safe view: blur incoming until the reader chooses to look. Hover-unblur
+   only where hover is real — same trap as .msgtools (touch browsers either
+   never hover or leave :hover stuck, which made this mode unreadable). */
 .safe-view .msg:not(.me) .bubble { filter: blur(7px); transition: filter .12s; }
-.safe-view .msg:not(.me):hover .bubble, .safe-view .msg:not(.me):focus-within .bubble { filter: none; }
+.safe-view .msg:not(.me):focus-within .bubble,
+.safe-view .msg:not(.me).revealed .bubble { filter: none; }
+@media (hover: hover) and (pointer: fine) {
+  .safe-view .msg:not(.me):hover .bubble { filter: none; }
+}
 
 /* jump-to-latest */
 .jump { position: absolute; left: 50%; bottom: 12px; z-index: 5; display: inline-flex; align-items: center; gap: 6px; background: var(--accent-grad); color: #fff; border: none; border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: var(--glow-strong); animation: jumpIn .22s cubic-bezier(.2,.9,.3,1); transform: translateX(-50%); transition: filter .15s; }

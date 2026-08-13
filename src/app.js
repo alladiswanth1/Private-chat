@@ -6,6 +6,14 @@
 // Live history hand-off lets newcomers catch up from whoever is currently present.
 
 import {joinRoom, selfId, getRelaySockets} from './vendor/trystero-nostr.bundle.js'
+import {
+  sanitize, normName, parseRoomFromHash, validateRoomForm, validT,
+  allowFlood, addTimelineEntry, pruneSeenIds, canIncrementalInsert,
+  insertNeedsFullRender, visibleEntries as visibleEntriesOf,
+  timelineNeighbor, healthDecision, countPeerPaths, peerConnectionState,
+  networkFingerprint, shouldReconnectOnNetworkEvent, backoffMs, relayDotClass,
+  classifyJoinError, noteSendResult, composerReady, rosterSignature,
+} from './logic.mjs'
 
 // WebCrypto + reliable WebRTC need a secure context. A plain-http visit (e.g.
 // Enforce-HTTPS off after a Pages reset) loads fine but can never connect —
@@ -45,13 +53,7 @@ const BASE = (() => {
 /* ------------------------------------------------------------------ *
  * Room code from URL (#r=<code>) + address-bar normalization
  * ------------------------------------------------------------------ */
-const normName = s => String(s || '').trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase().slice(0, 32)
-function parseRoomCode() {
-  const m = location.hash.match(/[#&]r=([^&]+)/)
-  let c = ''
-  if (m) { try { c = decodeURIComponent(m[1]) } catch { c = m[1] } }
-  return normName(c)
-}
+const parseRoomCode = () => parseRoomFromHash(location.hash)
 const ROOM_CODE = parseRoomCode()
 // Any deep URL or junk is collapsed; a valid #r=code is preserved. replaceState =
 // no reload, so a typed "/README.md" silently lands on the app with a clean bar.
@@ -165,6 +167,10 @@ let replyTo = null                 // {key, name, snippet}
 let pendingSys = []                // batched join/leave/rename lines
 let pendingSysTimer = null
 let entered = false                // true once past the join-screen name check
+let joinErrorKind = null           // last Trystero onJoinError classification
+let sendFailCount = 0              // consecutive failed sends → reconnect
+let lastRosterSig = ''
+let netFp = ''
 
 /* ------------------------------------------------------------------ *
  * Helpers
@@ -173,14 +179,6 @@ let entered = false                // true once past the join-screen name check
 // already textContent so this is not about XSS), then clamp by visible length.
 // U+200D (ZWJ) is intentionally NOT stripped - it glues emoji sequences
 // (family/profession/flag emoji). Strip ZWSP/ZWNJ, controls, bidi & BOM.
-const BAD_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B\u200C\u202A-\u202E\u2066-\u2069\uFEFF]/g
-function sanitize(v, max) {
-  if (typeof v !== 'string') return ''
-  let s = v.replace(BAD_CHARS, '')
-  // collapse runs of >2 newlines so a peer can't blow up the layout
-  s = s.replace(/\n{3,}/g, '\n\n')
-  return max ? s.slice(0, max) : s
-}
 const clampStr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '')
 const shortId = id => 'guest-' + String(id || '').slice(0, 4)
 const fp = id => String(id || '').slice(0, 4)
@@ -197,12 +195,7 @@ function colorOf(id) {
   return c
 }
 const initialOf = name => ((name || '?').trim()[0] || '?').toUpperCase()
-// clamp claimed timestamps to [now − 48h, now + 60s] so a peer can't pin
-// messages to the top of the timeline (where they'd evict first) or the future
-const validT = t => {
-  const now = Date.now()
-  return (typeof t === 'number' && isFinite(t)) ? Math.min(Math.max(t, now - 48 * 3600 * 1000), now + 60000) : now
-}
+
 function fmtTime(t) { return new Date(t).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) }
 function relTime(t) {
   const s = Math.floor((Date.now() - t) / 1000)
@@ -240,8 +233,21 @@ function checkMyNameCollision() {
   else maybeCloseRename()   // clash cleared (peer left/renamed) → release the modal
 }
 function setComposerEnabled(on) {
-  inputEl.disabled = !on; emojiBtn.disabled = !on; attachBtn.disabled = !on
-  sendBtn.disabled = !on || !inputEl.value.trim()
+  if (on) { syncComposer(); return }
+  inputEl.disabled = true; emojiBtn.disabled = true; attachBtn.disabled = true
+  sendBtn.disabled = true
+}
+function syncComposer() {
+  const ready = composerReady({entered, renaming, hasActions: !!actions})
+  inputEl.disabled = !ready
+  emojiBtn.disabled = !ready
+  attachBtn.disabled = !ready
+  sendBtn.disabled = !ready || !inputEl.value.trim()
+  if (entered && !renaming && !actions) {
+    inputEl.placeholder = 'Reconnecting — sending is paused…'
+  } else {
+    inputEl.placeholder = isDrawer() ? 'Say something…' : 'Say something…  (Shift+Enter for a new line, /help for commands)'
+  }
 }
 function openRenameModal() {
   if (renaming) return
@@ -287,33 +293,22 @@ const nameIsDuplicated = name => !!name && dupNames.has(String(name).trim().toLo
 /* ------------------------------------------------------------------ *
  * Timeline (single source of truth)
  * ------------------------------------------------------------------ */
-const cmp = (a, b) => a.t - b.t || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 function addEntry(entry) {
-  if (entry.id && seenIds.has(entry.id)) return null
-  if (entry.id) seenIds.add(entry.id)
-  let i = timeline.length
-  while (i > 0 && cmp(timeline[i - 1], entry) > 0) i--
-  timeline.splice(i, 0, entry)
+  const res = addTimelineEntry(timeline, seenIds, entry, CONFIG.maxRendered)
+  if (!res.added) return null
   if (entry.id) entryById.set(entry.id, entry)
-  const atEnd = i === timeline.length - 1
-  let evicted = false
-  while (timeline.length > CONFIG.maxRendered) {
-    const r = timeline.shift()
-    evicted = true
-    entryById.delete(r.id); nodeCache.delete(r.id)   // drop the retained DOM row too
+  for (const r of res.evicted) {
+    entryById.delete(r.id); nodeCache.delete(r.id)
     if (r.kind === 'msg' || r.kind === 'file') reactions.delete(r.id)
-    if (r.id === unreadMarkerId) unreadMarkerId = null   // its divider can never render again
-    if (r.kind === 'file' && r.url) URL.revokeObjectURL(r.url)   // free the blob (ephemeral)
-    // Do NOT delete r.id from seenIds — keeping dedup stable stops an evicted
-    // message being re-inserted as a duplicate by a late history burst.
+    if (r.id === unreadMarkerId) unreadMarkerId = null
+    if (r.kind === 'file' && r.url) URL.revokeObjectURL(r.url)
   }
-  // soft-cap the dedup set so a marathon session can't grow it unbounded
-  if (seenIds.size > 4000) { const it = seenIds.values(); for (let k = 0; k < 1000; k++) seenIds.delete(it.next().value) }
-  return {atEnd, evicted}
+  pruneSeenIds(seenIds)
+  return {atEnd: res.atEnd, evicted: res.evicted.length > 0, index: res.index}
 }
 
 function visibleEntries() {
-  return timeline.filter(e => e.kind === 'sys' || !isMuted(e.peerId))   // mute hides msg + file
+  return visibleEntriesOf(timeline, muted.size ? isMuted : null)
 }
 
 // Rows are built once and cached by entry id. A re-render (mute, history burst,
@@ -461,14 +456,14 @@ function openTools(row) {
   row.classList.add('tools-open')
 }
 function attachTouchGestures(row, entry) {
-  let pressTimer = null, x0 = 0, y0 = 0, dx = 0, tracking = false, swiping = false
+  let pressTimer = null, x0 = 0, y0 = 0, dx = 0, tracking = false, swiping = false, openedTools = false
   const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null }
 
   row.addEventListener('pointerdown', ev => {
     if (ev.pointerType === 'mouse' || !isDrawer()) return
     if (ev.target.closest('.msgtools, a, .react, .replyquote, .fdl, .filemsg-img')) return
-    x0 = ev.clientX; y0 = ev.clientY; dx = 0; tracking = true; swiping = false
-    pressTimer = setTimeout(() => { pressTimer = null; tracking = false; openTools(row); buzz(12) }, LONG_PRESS_MS)
+    x0 = ev.clientX; y0 = ev.clientY; dx = 0; tracking = true; swiping = false; openedTools = false
+    pressTimer = setTimeout(() => { pressTimer = null; tracking = false; openedTools = true; openTools(row); buzz(12) }, LONG_PRESS_MS)
   }, {passive: true})
 
   row.addEventListener('pointermove', ev => {
@@ -485,15 +480,20 @@ function attachTouchGestures(row, entry) {
   }, {passive: true})
 
   const release = () => {
+    const wasTracking = tracking
     cancelPress()
     if (swiping) {
       if (row.classList.contains('swipe-armed')) { startReply(entry); buzz(10) }
       row.classList.add('swipe-back')
       row.style.transform = ''
       setTimeout(() => row.classList.remove('swipe-back'), 200)
+    } else if (wasTracking && !openedTools && entry.peerId !== selfId && document.body.classList.contains('safe-view')) {
+      // Fine pointers unblur on hover. Touch has no hover, so a plain tap
+      // reveals (or re-hides) the bubble — otherwise Safe view is unreadable.
+      row.classList.toggle('revealed')
     }
     row.classList.remove('swipe-armed')
-    tracking = false; swiping = false; dx = 0
+    tracking = false; swiping = false; dx = 0; openedTools = false
   }
   row.addEventListener('pointerup', release, {passive: true})
   row.addEventListener('pointercancel', release, {passive: true})
@@ -531,8 +531,13 @@ function retrySend(entry) {
   if (entry.emote) payload.emote = true
   if (entry.reply) payload.reply = entry.reply
   Promise.resolve(actions.msg.send(payload)).then(
-    () => setMsgStatus(entry, audience ? 'sent' : 'alone'),
-    () => setMsgStatus(entry, 'failed'))
+    () => { sendFailCount = noteSendResult(true, sendFailCount).consecutiveFails; setMsgStatus(entry, audience ? 'sent' : 'alone') },
+    () => {
+      const r = noteSendResult(false, sendFailCount)
+      sendFailCount = r.consecutiveFails
+      setMsgStatus(entry, 'failed')
+      if (r.reconnect) scheduleReconnect('messages could not be delivered')
+    })
 }
 
 function badge(peerId) {
@@ -787,12 +792,20 @@ function addMessage(entry, fromSelf) {
   const stick = fromSelf || keepAtBottom
   const res = addEntry({kind: 'msg', ...entry})
   if (!res) return false
-  // fast path only when the entry lands at the end AND nothing was evicted (so the
-  // DOM stays in lockstep with the timeline); otherwise do a full, correct render.
-  const fast = res.atEnd && !res.evicted && !isMuted(entry.peerId) && messagesEl.firstElementChild && emptyEl.hidden
-  // mark where "away" reading should resume, before the row is placed
-  if (!fromSelf && !isMuted(entry.peerId) && unreadMarkerId === null && (document.hidden || !stick)) unreadMarkerId = entry.id
-  if (fast) appendOne(entry, stick); else renderTimeline({stick})
+  const added = timeline[res.index]
+  const skip = e => e.kind !== 'sys' && isMuted(e.peerId)
+  const prev = timelineNeighbor(timeline, res.index, -1, skip)
+  const next = timelineNeighbor(timeline, res.index, 1, skip)
+  // Clock-skew inserts land just before the last row. Rebuilding all 400 rows
+  // for that is the expensive path; splice next to the neighbor instead.
+  const incremental = canIncrementalInsert({
+    evicted: res.evicted,
+    muted: isMuted(entry.peerId),
+    hasDom: !!messagesEl.firstElementChild,
+    emptyHidden: !!emptyEl.hidden,
+  }) && !insertNeedsFullRender(prev, added, next, CONFIG.gapDividerMs)
+  if (!fromSelf && !isMuted(entry.peerId) && unreadMarkerId === null && (document.hidden || !stick)) unreadMarkerId = added.id
+  if (incremental) insertOneAt(added, stick, prev, next); else renderTimeline({stick})
   if (!fromSelf && !isMuted(entry.peerId)) {
     announceMsg(`${entry.name}: ${entry.text}`)
     chime()
@@ -802,17 +815,7 @@ function addMessage(entry, fromSelf) {
   return true
 }
 
-function appendOne(entry, stick) {
-  // grouping + gap divider derived from the timeline (not the DOM), so it stays
-  // correct; the previous visible entry is found by walking back from the end
-  // rather than materialising and scanning the whole visible list.
-  let prev = null
-  for (let i = timeline.length - 2; i >= 0; i--) {
-    const e = timeline[i]
-    if (e.kind === 'sys' || !isMuted(e.peerId)) { prev = e; break }
-  }
-  if (entry.id === unreadMarkerId) messagesEl.appendChild(unreadDivider())
-  if (prev && prev.kind === 'msg' && entry.t - prev.t > CONFIG.gapDividerMs) messagesEl.appendChild(sysNode(timeLabel(entry.t)))
+function insertOneAt(entry, stick, prev, next) {
   const grouped = !!prev && prev.kind === 'msg' && !prev.emote && !entry.emote && prev.peerId === entry.peerId && entry.t - prev.t <= CONFIG.gapDividerMs
   const node = nodeFor(entry, grouped)
   // The class must come back off: cached rows are re-inserted by a later full
@@ -820,7 +823,19 @@ function appendOne(entry, stick) {
   // `msg--new` would make old rows pop again every time the list rebuilds.
   node.classList.add('msg--new')
   setTimeout(() => node.classList.remove('msg--new'), 300)
-  messagesEl.appendChild(node)
+  if (!next) {
+    if (entry.id === unreadMarkerId) messagesEl.appendChild(unreadDivider())
+    if (prev && prev.kind === 'msg' && entry.t - prev.t > CONFIG.gapDividerMs) messagesEl.appendChild(sysNode(timeLabel(entry.t)))
+    messagesEl.appendChild(node)
+  } else {
+    const hit = nodeCache.get(next.id)
+    if (!hit || !hit.el.isConnected) { renderTimeline({stick}); return }
+    nodeCache.delete(next.id)
+    const nextGrouped = next.kind === 'msg' && !next.emote && !entry.emote && next.peerId === entry.peerId && next.t - entry.t <= CONFIG.gapDividerMs
+    const nextNode = next.kind === 'sys' ? sysFor(next) : nodeFor(next, nextGrouped)
+    hit.el.replaceWith(nextNode)
+    nextNode.parentNode.insertBefore(node, nextNode)
+  }
   if (stick) stickToBottom()
 }
 
@@ -1210,9 +1225,11 @@ async function startChat() {
     // this is what actually keeps your address out of the candidate exchange
     if (relayOnly && CONFIG.turnConfig.length) cfg.rtcConfig = {iceTransportPolicy: 'relay'}
     if (myPass) cfg.password = await stretchPass(myPass)
-    room = joinRoom(cfg, CONFIG.roomId)
+    joinErrorKind = null
+    room = joinRoom(cfg, CONFIG.roomId, {onJoinError: handleJoinError})
     wireRoom(room)
     updateStatusLoop()
+    syncComposer()
   } catch (err) {
     // A missing WebCrypto is permanent — retrying can't help. Anything else is
     // likely transient (relay hiccup mid-rejoin), so keep trying with backoff
@@ -1223,9 +1240,32 @@ async function startChat() {
     } else showFatal(err)
   }
 }
+function handleJoinError(info) {
+  const kind = classifyJoinError(info && info.error)
+  joinErrorKind = kind
+  if (!entered) return
+  if (kind === 'password') {
+    showConnBanner('Wrong room password — you cannot see or reach the people already here. Rejoin with the password they used.')
+  } else if (kind === 'turn') {
+    addSystem('A peer could not connect — the public relay may be busy.')
+  }
+}
+
+function showConnBanner(text) {
+  bannerEl.replaceChildren()
+  const t = document.createElement('span')
+  t.textContent = text
+  const x = document.createElement('button')
+  x.type = 'button'; x.className = 'banner-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Dismiss')
+  x.addEventListener('click', () => { bannerEl.hidden = true })
+  bannerEl.append(t, x)
+  bannerEl.hidden = false
+}
+
 function showFatal(err) {
   statusDot.className = 'dot dot--off'
   statusText.textContent = 'Connection failed'
+  syncComposer()
   addSystem(!window.isSecureContext
     ? 'Could not start: serve this over HTTPS (or http://localhost) and reload.'
     : `Could not connect: ${(err && err.message) || 'unknown error'}. Try reloading.`)
@@ -1241,7 +1281,8 @@ function reconnect(why) {
   typingTimers.clear(); peers.clear(); histAcceptedFrom.clear(); floodState.clear()
   cancelAttestation()   // keep the DAG (timeline survives a reconnect), drop the pending vote
   prevRelays = 0; noPeerSince = 0; lastHealthy = Date.now()
-  renderRoster(); renderTyping()
+  sendFailCount = 0; joinErrorKind = null
+  renderRoster(); renderTyping(); syncComposer()
   // an automatic retry says why, so a reconnect nobody asked for isn't mysterious
   addSystem(why ? `Reconnecting — ${why}…` : 'Reconnecting…')
   startChat()
@@ -1263,16 +1304,12 @@ function leaveAndReset() {
   clearTimeout(reconnectTimer); reconnectTimer = null; reconnectTries = 0; lastHealthy = Date.now()
   hideJump(); setUnread(0); keepAtBottom = true
   prevRelays = 0; noPeerSince = 0
+  sendFailCount = 0; joinErrorKind = null; lastRosterSig = ''
+  syncComposer()
 }
 
 function allow(peerId, channel) {
-  const [n, ms] = CONFIG.flood[channel] || CONFIG.flood.msg
-  const k = peerId + ':' + channel
-  const now = Date.now()
-  const s = floodState.get(k)
-  if (!s || now - s.start > ms) { floodState.set(k, {count: 1, start: now}); return true }
-  s.count++
-  return s.count <= n
+  return allowFlood(floodState, peerId, channel, CONFIG.flood)
 }
 
 function wireRoom(room) {
@@ -1402,6 +1439,7 @@ function wireRoom(room) {
 
   // if nobody hands us history shortly after joining, ask for it
   setTimeout(() => { if (actions && peers.size > 0 && !timeline.some(e => e.kind === 'msg')) actions.histReq.send(1) }, 2500)
+  syncComposer()
 }
 
 // elect a single history sender: the lowest selfId among peers I know (excluding the newcomer)
@@ -1508,6 +1546,9 @@ function renderRoster() {
   requestAnimationFrame(() => { rosterPending = false; renderRosterNow() })
 }
 function renderRosterNow() {
+  const sig = rosterSignature(selfId, myName, peers, muted)
+  if (sig === lastRosterSig) return
+  lastRosterSig = sig
   const count = peers.size + 1
   onlineCountEl.textContent = String(count)
   peopleCountEl.textContent = String(count)
@@ -1550,7 +1591,11 @@ function sendMessage() {
   if (renaming) return                 // must resolve a forced rename first
   const raw = inputEl.value
   const text = sanitize(raw, CONFIG.maxMsgLen).trim()
-  if (!text || !actions) return
+  if (!text) return
+  if (!composerReady({entered, renaming, hasActions: !!actions})) {
+    if (entered && !actions) addSystem('Still reconnecting — try again in a moment.')
+    return
+  }
   if (text[0] === '/' && handleSlash(text)) { inputEl.value = ''; stopTyping(); updateSendBtn(); return }
   const rawId = newRawId()
   const prev = currentHeads().slice(-3)   // weave this message into the room's hash-DAG
@@ -1563,8 +1608,13 @@ function sendMessage() {
   // "nobody was here" instead of a tick that implies someone read it
   const audience = peers.size
   Promise.resolve(wire).then(
-    () => setMsgStatus(entry, audience ? 'sent' : 'alone'),
-    () => setMsgStatus(entry, 'failed'))
+    () => { sendFailCount = noteSendResult(true, sendFailCount).consecutiveFails; setMsgStatus(entry, audience ? 'sent' : 'alone') },
+    () => {
+      const r = noteSendResult(false, sendFailCount)
+      sendFailCount = r.consecutiveFails
+      setMsgStatus(entry, 'failed')
+      if (r.reconnect) scheduleReconnect('messages could not be delivered')
+    })
   inputEl.value = ''; autoGrow(); cancelReply(); stopTyping(); updateSendBtn(); inputEl.focus()
 }
 
@@ -1617,7 +1667,7 @@ function handleSlash(text) {
       return true
     }
     case 'who': addSystem('Here now: ' + [myName + ' (you)', ...[...peers.values()].map(p => p.name).filter(Boolean)].join(', ')); return true
-    case 'clear': revokeAllFileUrls(); timeline.length = 0; seenIds.clear(); entryById.clear(); nodeCache.clear(); reactions.clear(); unreadMarkerId = null; renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
+    case 'clear': revokeAllFileUrls(); timeline.length = 0; seenIds.clear(); entryById.clear(); nodeCache.clear(); reactions.clear(); unreadMarkerId = null; resetDag(); renderTimeline(); addSystem('Cleared your local view (others are unaffected).'); return true
     case 'shrug': inputEl.value = '¯\\_(ツ)_/¯'; sendMessage(); return true
     case 'help': addSystem('Commands: /nick <name> · /me <action> · /who · /clear · /shrug · /help'); return true
     default: addSystem(`Unknown command: /${cmd} — try /help`); return true
@@ -1639,7 +1689,8 @@ function stopTyping() {
   iTyping = false; typingSentAt = 0
 }
 function updateSendBtn() {
-  sendBtn.disabled = !inputEl.value.trim()
+  const ready = composerReady({entered, renaming, hasActions: !!actions})
+  sendBtn.disabled = !ready || !inputEl.value.trim()
   updateCounter()
 }
 // Silent until it matters: the remaining-characters hint only appears near the
@@ -1678,13 +1729,30 @@ function relayStates() {
  * Time-since-healthy has no such hole: retry churn never touches it, only a
  * working connection does. Sockets still trying earn a longer window than a set
  * that has gone fully closed, so a slow network is not torn down mid-handshake. */
-const DEAD_TRYING = 16000, DEAD_CLOSED = 6000
 let lastHealthy = Date.now()
+function peerPathSnapshot() {
+  try {
+    if (!room || typeof room.getPeers !== 'function') return null
+    const map = room.getPeers()
+    if (!map) return {live: 0, trying: 0, dead: 0}
+    const pcs = typeof map.values === 'function' && !Array.isArray(map) ? [...map.values()] : Object.values(map)
+    return countPeerPaths(pcs.map(peerConnectionState))
+  } catch { return null }
+}
 function checkHealth(open, online, trying) {
-  if (!entered || reconnectTimer) return
-  if (open > 0 || online > 0) { lastHealthy = Date.now(); connectionRecovered(); return }
-  if (Date.now() - lastHealthy < (trying ? DEAD_TRYING : DEAD_CLOSED)) return
-  scheduleReconnect('the connection dropped')
+  const paths = peerPathSnapshot()
+  const decision = healthDecision({
+    entered,
+    reconnectPending: !!reconnectTimer,
+    openRelays: open,
+    rosterPeers: online,
+    livePeerPaths: paths ? paths.live : null,
+    trying: trying || !!(paths && paths.trying),
+    lastHealthy,
+    now: Date.now(),
+  })
+  if (decision === 'healthy') { lastHealthy = Date.now(); connectionRecovered(); return }
+  if (decision === 'reconnect') scheduleReconnect('the connection dropped')
 }
 function updateStatusLoop() {
   const tick = () => {
@@ -1738,9 +1806,16 @@ function openStatusPanel() {
   const h = document.createElement('div'); h.className = 'sp-h'; h.textContent = 'Relays'; statusPanel.appendChild(h)
   for (const s of relayStates()) {
     const r = document.createElement('div'); r.className = 'sp-row'
-    const d = document.createElement('span'); d.className = 'dot ' + (s.open ? 'dot--on' : 'dot--off')
+    const d = document.createElement('span'); d.className = relayDotClass(s)
     const u = document.createElement('span'); u.className = 'sp-url'; u.textContent = s.url.replace('wss://', '')
     r.append(d, u); statusPanel.appendChild(r)
+  }
+  const paths = peerPathSnapshot()
+  if (paths) {
+    const pr = document.createElement('div'); pr.className = 'sp-row'
+    pr.textContent = paths.live + ' live data path' + (paths.live === 1 ? '' : 's')
+      + (paths.trying ? ` · ${paths.trying} connecting` : '')
+    statusPanel.appendChild(pr)
   }
   const ph = document.createElement('div'); ph.className = 'sp-h'; ph.textContent = 'Peers'; statusPanel.appendChild(ph)
   if (!peers.size) { const e = document.createElement('div'); e.className = 'sp-row'; e.textContent = 'none yet'; statusPanel.appendChild(e) }
@@ -2024,7 +2099,10 @@ try { safeView = localStorage.getItem('c2c-safe') === '1' } catch {}
 function applyBlur() {
   document.body.classList.toggle('safe-view', safeView)
   blurBtn.setAttribute('aria-pressed', String(safeView))
-  blurBtn.title = safeView ? 'Safe view on (messages blurred until hover)' : 'Safe view off'
+  blurBtn.title = safeView
+    ? 'Safe view on (hover or tap a message to read it)'
+    : 'Safe view off'
+  if (!safeView) messagesEl.querySelectorAll('.msg.revealed').forEach(el => el.classList.remove('revealed'))
 }
 function toggleBlur() { safeView = !safeView; try { localStorage.setItem('c2c-safe', safeView ? '1' : '0') } catch {}; applyBlur() }
 
@@ -2157,13 +2235,14 @@ roomChip.addEventListener('click', e => { e.stopPropagation(); roomsPanel.hidden
 roomsCopyLink.addEventListener('click', () => copyText(shareUrl(), roomsCopyLink, '🔗 Copy link'))
 roomsCopyName.addEventListener('click', () => { if (!CONFIG.isDefaultRoom) copyText(CONFIG.roomCode, roomsCopyName, '# Copy name') })
 roomGoBtn.addEventListener('click', () => {
-  const n = normName(roomNameInput.value), pass = roomPassInput.value.trim()
-  if (!n) { roomNameInput.focus(); return }
-  if (pass.length < CONFIG.minPassLen) {
-    roomErrEl.textContent = pass ? `Use at least ${CONFIG.minPassLen} characters — the password becomes the room's encryption key.` : 'A password is required.'
-    roomErrEl.hidden = false; roomPassInput.focus(); return
+  const v = validateRoomForm(roomNameInput.value, roomPassInput.value, CONFIG.minPassLen)
+  if (!v.ok) {
+    roomErrEl.textContent = v.error
+    roomErrEl.hidden = false
+    ;(v.field === 'pass' ? roomPassInput : roomNameInput).focus()
+    return
   }
-  gotoRoom(n, pass)
+  gotoRoom(v.name, v.pass)
 })
 roomPassInput.addEventListener('input', () => { roomErrEl.hidden = true })
 roomNameInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); roomPassInput.focus() } })
@@ -2233,7 +2312,7 @@ function scheduleReconnect(why, delay) {
   if (!entered || reconnectTimer) return
   reconnectTries++
   // back off so a genuinely dead network doesn't become a rejoin loop
-  const wait = delay ?? Math.min(20000, 1000 * 2 ** (reconnectTries - 1))
+  const wait = delay ?? backoffMs(reconnectTries)
   statusDot.className = 'dot dot--wait'
   setStatus('Reconnecting…')
   reconnectTimer = setTimeout(() => {
@@ -2242,7 +2321,7 @@ function scheduleReconnect(why, delay) {
     reconnect(why)
   }, wait)
 }
-function connectionRecovered() { reconnectTries = 0 }
+function connectionRecovered() { reconnectTries = 0; sendFailCount = 0 }
 
 window.addEventListener('offline', () => { statusDot.className = 'dot dot--off'; setStatus('Offline') })
 window.addEventListener('online', () => { if (entered) scheduleReconnect('the network came back', 600) })
@@ -2250,10 +2329,14 @@ window.addEventListener('online', () => { if (entered) scheduleReconnect('the ne
 // Network Information API: fires when the device moves between wifi and
 // cellular, which is the one transition that produces no online/offline pair.
 const netInfo = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+netFp = networkFingerprint(netInfo)
 if (netInfo && netInfo.addEventListener) {
   netInfo.addEventListener('change', () => {
-    if (!entered) return
-    reconnectTries = 0          // a deliberate network change deserves a prompt retry
+    const next = networkFingerprint(netInfo)
+    const move = shouldReconnectOnNetworkEvent({entered, prevFp: netFp, nextFp: next})
+    netFp = next
+    if (!move) return
+    reconnectTries = 0          // a type/effectiveType change deserves a prompt retry
     scheduleReconnect('the network changed', 600)
   })
 }
@@ -2287,28 +2370,29 @@ const surprise = () => ADJ[Math.floor(Math.random() * ADJ.length)] + ANI[Math.fl
  * ------------------------------------------------------------------ */
 function setGateChecking(on) {
   gateGo.disabled = on
-  gateGo.textContent = on ? 'Checking name…' : 'Join the chat →'
+  gateGo.textContent = on ? 'Connecting…' : 'Join the chat →'
 }
 function showGateError(msg) { gateErr.textContent = msg; gateErr.hidden = false; nickInput.focus(); nickInput.select() }
 function revealApp() {
   entered = true
-  gate.hidden = true; app.hidden = false; inputEl.focus()
-  refreshEmpty(); bumpActivity()
+  gate.hidden = true; app.hidden = false
+  refreshEmpty(); bumpActivity(); syncComposer(); inputEl.focus()
 }
 // Best-effort pre-entry uniqueness: join, discover present peers for a short
 // window (bailing early on a clash), reject if the name is taken.
 async function joinWithNameCheck() {
   await startChat()
-  if (!room) { revealApp(); return true }   // connection failed → let them in to see the error
+  if (!room) { revealApp(); return 'ok' }   // connection failed → let them in to see the error
   // Block instantly on a clash. Otherwise decide "free" as soon as we're confident:
   // connected peers are all named & clean, or relays are up with no peers after a
   // grace (empty room). Hard cap accounts for slow public-relay discovery; anything
   // that slips past is caught by the live auto-rename fallback.
-  const taken = await new Promise(resolve => {
+  const outcome = await new Promise(resolve => {
     const t0 = Date.now()
     let relaysUpAt = 0
     const iv = setInterval(() => {
-      if (nameTakenByPeer(myName)) { clearInterval(iv); resolve(true); return }   // clash → block
+      if (joinErrorKind === 'password') { clearInterval(iv); resolve('password'); return }
+      if (nameTakenByPeer(myName)) { clearInterval(iv); resolve('taken'); return }
       const el = Date.now() - t0
       if (!relaysUpAt && relayStates().some(s => s.open)) relaysUpAt = Date.now()
       // Empty room: relays up but nobody connected after a grace → free, fast.
@@ -2318,12 +2402,12 @@ async function joinWithNameCheck() {
       // early-exit on partial discovery, or a peer still connecting could be
       // missed); slow-tail slips are caught by the forced-rename fallback.
       const settled = relaysUpAt && peers.size === 0 && Date.now() - relaysUpAt > 1800
-      if (settled || el > 5000) { clearInterval(iv); resolve(false) }
+      if (settled || el > 5000) { clearInterval(iv); resolve('ok') }
     }, 100)
   })
-  if (taken) { leaveAndReset(); renderRoster(); renderTimeline(); return false }
+  if (outcome !== 'ok') { leaveAndReset(); renderRoster(); renderTimeline(); return outcome }
   revealApp()
-  return true
+  return 'ok'
 }
 
 /* ------------------------------------------------------------------ *
@@ -2336,11 +2420,8 @@ function boot() {
   // the keyboard hint only fits on wide screens. Driven by the media query, not
   // `resize` — an opening mobile keyboard fires resize repeatedly and none of
   // those events can change the answer.
-  const setPlaceholder = () => {
-    inputEl.placeholder = isDrawer() ? 'Say something…' : 'Say something…  (Shift+Enter for a new line, /help for commands)'
-  }
-  setPlaceholder()
-  NARROW_MQ.addEventListener('change', setPlaceholder)
+  syncComposer()
+  NARROW_MQ.addEventListener('change', syncComposer)
   buildEmoji('')
   updateSendBtn()
   emptyBtn.addEventListener('click', () => copyText(shareUrl(), emptyBtn, '🔗 Copy invite link'))
@@ -2387,9 +2468,10 @@ function boot() {
     gateErr.hidden = true
     setMyName(n); renderRoster()
     setGateChecking(true)
-    const ok = await joinWithNameCheck()
+    const outcome = await joinWithNameCheck()
     setGateChecking(false)
-    if (!ok) showGateError(`"${n}" is already taken in this room — choose a different name.`)
+    if (outcome === 'taken') showGateError(`"${n}" is already taken in this room — choose a different name.`)
+    else if (outcome === 'password') showGateError('That password does not match this room. Check it and try again.')
   })
 }
 

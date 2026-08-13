@@ -11,6 +11,7 @@ const read = f => readFileSync(`${SRC}/${f}`, 'utf8')
 const template = read('index.template.html')
 const css = read('style.css')
 let vendor = read('vendor/trystero-nostr.bundle.js')
+let logic = read('logic.mjs')
 let app = read('app.js')
 
 // 1) Turn the vendor's ESM `export{A as b,...}` into a globalThis bridge so the
@@ -35,22 +36,51 @@ app = app.replace(
 )
 if (app === before) throw new Error('Could not find the app vendor import to replace')
 
+// 2b) Bridge src/logic.mjs the same way so the published page stays one file.
+let logicBridged = false
+logic = logic.replace(/export\s*\{([^}]*)\}\s*;?/, (_, inner) => {
+  logicBridged = true
+  const fields = inner.split(',').map(s => s.trim()).filter(Boolean).map(tok => {
+    const [local, exported] = tok.split(/\s+as\s+/).map(s => s.trim())
+    return `${exported || local}:${local}`
+  })
+  return `globalThis.__L={${fields.join(',')}};`
+})
+if (!logicBridged) throw new Error('Could not find the logic export{} to bridge')
+const beforeLogic = app
+app = app.replace(
+  /^[ \t]*import\s*\{[^}]*\}\s*from\s*['"][^'"]*logic[^'"]*['"];?[ \t]*$/m,
+  (full) => {
+    const names = full.match(/\{([^}]*)\}/)[1]
+    const dest = names.split(',').map(s => s.trim()).filter(Boolean).map(tok => {
+      const [exported, local] = tok.split(/\s+as\s+/).map(s => s.trim())
+      return local ? `${exported}: ${local}` : exported
+    }).join(', ')
+    return `const {${dest}} = globalThis.__L;`
+  }
+)
+if (app === beforeLogic) throw new Error('Could not find the app logic import to replace')
+
 // 3) Neutralise any literal </script> inside inlined JS so it can't close the tag.
 const escJs = s => s.replace(/<\/(script)/gi, '<\\/$1')
 
 const styleTag = `<style>\n${css}\n</style>`
 const vendorJs = `\n${escJs(vendor)}\n`
+const logicJs = `\n${escJs(logic)}\n`
 const appJs = `\n${escJs(app)}\n`
 const flagJs = 'window.__C2C_404 = 1'   // injected into 404.html below
+// Separate module scripts: logic's function names must not collide with the
+// app's `const {sanitize, ...} = globalThis.__L` destructure.
 const scriptTags =
   `<script type="module">${vendorJs}</script>\n` +
+  `  <script type="module">${logicJs}</script>\n` +
   `  <script type="module">${appJs}</script>`
 
 // 3a) script-src carries the sha256 of each inline script INSTEAD of
 //     'unsafe-inline' — even an HTML-injection bug couldn't execute a script
 //     the build didn't hash. (The 404 flag hash is inert on index.html.)
 const cspHash = s => "'sha256-" + createHash('sha256').update(s, 'utf8').digest('base64') + "'"
-const scriptSrc = [vendorJs, appJs, flagJs].map(cspHash).join(' ')
+const scriptSrc = [vendorJs, logicJs, appJs, flagJs].map(cspHash).join(' ')
 
 // 3b) Tighten the CSP: connect-src lists exactly the relay origins from
 //     CONFIG.relayUrls instead of a blanket `wss:` (TURN/WebRTC traffic is not
